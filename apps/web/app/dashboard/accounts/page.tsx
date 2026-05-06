@@ -10,6 +10,7 @@ import ErrorAlert from "../../../components/ui/error-alert";
 import Input from "../../../components/ui/input";
 import {
   cancelTelegramConnectSession,
+  cleanupFailedTelegramAccounts,
   getTelegramConnectSession,
   listTelegramAccounts,
   startTelegramConnect,
@@ -105,7 +106,7 @@ export default function AccountsPage() {
     setError(null);
     setLoadingConnect(true);
     try {
-      const created = await startTelegramConnect({ displayName: "Рабочий аккаунт" });
+      const created = await startTelegramConnect({});
       setActiveLoginSessionId(created.loginSessionId);
       setConnectState(null);
     } catch (e) {
@@ -132,6 +133,23 @@ export default function AccountsPage() {
         <div>
           <Button onClick={onConnectStart} disabled={loadingConnect || qrVisible}>
             {loadingConnect ? "Подключаем..." : "Подключить аккаунт"}
+          </Button>
+        </div>
+        <div>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              try {
+                const result = await cleanupFailedTelegramAccounts();
+                if (result.deleted > 0) {
+                  await load();
+                }
+              } catch (e) {
+                setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR"));
+              }
+            }}
+          >
+            Очистить неудачные попытки
           </Button>
         </div>
         <p className="text-sm text-slate-600">
@@ -198,7 +216,7 @@ export default function AccountsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium">
-                    {item.username ? `@${item.username}` : item.displayName || "Рабочий аккаунт"}
+                    {item.firstName || (item.username ? `@${item.username}` : item.displayName || "Аккаунт")}
                   </p>
                   <p className="text-sm text-slate-600">
                     Статус: {item.status === "CONNECTED" ? "подключён" : item.status.toLowerCase()}

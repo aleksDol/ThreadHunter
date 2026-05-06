@@ -36,6 +36,12 @@ docker compose -p expert-comment -f docker-compose.prod.yml --env-file .env.prod
 - этот запуск использует отдельный project name `expert-comment`
 - не затрагивает контейнеры старого Copilot
 
+Если frontend/API контейнеры обновились и внешний nginx-контейнер кеширует старые upstream-сокеты, перезапустите его:
+
+```bash
+docker restart ai-sales-nginx
+```
+
 ## 5. Prisma migrations
 
 Выполните миграции из API контейнера:

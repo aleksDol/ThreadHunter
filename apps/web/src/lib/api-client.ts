@@ -318,6 +318,7 @@ export const updateTelegramAccountSafety = (id: string, input: Partial<Pick<Acco
 export const startTelegramConnect = (input: StartTelegramConnectInput) => apiFetch<{ accountId: string; loginSessionId: string; status: string }>("/telegram-accounts/connect/start", { method: "POST", body: JSON.stringify(input) });
 export const getTelegramConnectSession = (loginSessionId: string) => apiFetch<TelegramLoginSession>(`/telegram-accounts/connect/${loginSessionId}`);
 export const cancelTelegramConnectSession = (loginSessionId: string) => apiFetch<{ ok: true }>(`/telegram-accounts/connect/${loginSessionId}/cancel`, { method: "POST" });
+export const cleanupFailedTelegramAccounts = () => apiFetch<{ ok: true; deleted: number }>("/telegram-accounts/cleanup-failed", { method: "POST" });
 export const updateTelegramAccount = (id: string, input: UpdateTelegramAccountInput) => apiFetch<TelegramAccount>(`/telegram-accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteTelegramAccount = (id: string) => apiFetch<{ ok: true }>(`/telegram-accounts/${id}`, { method: "DELETE" });
 

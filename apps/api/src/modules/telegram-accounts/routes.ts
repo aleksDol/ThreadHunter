@@ -300,6 +300,42 @@ router.post("/connect/:loginSessionId/cancel", async (req, res) => {
   res.json({ ok: true });
 });
 
+router.post("/cleanup-failed", async (req, res) => {
+  const workspaceId = req.auth!.workspaceId;
+
+  const staleAccounts = await prisma.telegramAccount.findMany({
+    where: {
+      workspaceId,
+      status: { in: [TelegramAccountStatus.FAILED, TelegramAccountStatus.DISCONNECTED, TelegramAccountStatus.CONNECTING] },
+      connectedAt: null
+    },
+    select: { id: true }
+  });
+
+  if (staleAccounts.length === 0) {
+    res.json({ ok: true, deleted: 0 });
+    return;
+  }
+
+  const accountIds = staleAccounts.map((a) => a.id);
+
+  await prisma.telegramLoginSession.deleteMany({
+    where: {
+      workspaceId,
+      telegramAccountId: { in: accountIds }
+    }
+  });
+
+  await prisma.telegramAccount.deleteMany({
+    where: {
+      workspaceId,
+      id: { in: accountIds }
+    }
+  });
+
+  res.json({ ok: true, deleted: accountIds.length });
+});
+
 router.patch("/:id", async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) {

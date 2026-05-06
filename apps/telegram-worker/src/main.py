@@ -106,7 +106,7 @@ def update_channel(conn: Any, channel_id: str, **fields: Any) -> None:
 def get_login_payload(conn: Any, session_id: str) -> Optional[dict[str, Any]]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            'SELECT ls.*, ta."proxyHost", ta."proxyPort", ta."proxyUsername", ta."proxyPassword" '
+            'SELECT ls.*, ta."displayName", ta."proxyHost", ta."proxyPort", ta."proxyUsername", ta."proxyPassword" '
             'FROM "TelegramLoginSession" ls '
             'JOIN "TelegramAccount" ta ON ta."id" = ls."telegramAccountId" '
             'WHERE ls."id" = %s',
@@ -503,10 +503,15 @@ async def process_login_job(
         me = await client.get_me()
         session_string = client.session.save()
         encrypted_session = encrypt_session(session_string, enc_key)
+        existing_display_name = (payload.get("displayName") or "").strip()
+        next_display_name = existing_display_name
+        if not existing_display_name or existing_display_name.lower() == "рабочий аккаунт":
+            next_display_name = (getattr(me, "first_name", None) or getattr(me, "username", None) or existing_display_name)
 
         update_account(
             conn,
             account_id,
+            displayName=next_display_name or None,
             status="CONNECTED",
             sessionEncrypted=encrypted_session,
             telegramUserId=str(me.id),
