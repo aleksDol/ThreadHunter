@@ -1,5 +1,5 @@
 ﻿import { config } from "dotenv";
-import { Telegraf } from "telegraf";
+import { Markup, Telegraf } from "telegraf";
 import { z } from "zod";
 
 config();
@@ -8,21 +8,33 @@ const envSchema = z.object({
   TELEGRAM_VERIFY_BOT_TOKEN: z.string().min(1),
   TELEGRAM_VERIFY_BOT_USERNAME: z.string().min(1),
   INTERNAL_BOT_SECRET: z.string().min(1),
-  API_INTERNAL_URL: z.string().default("http://api:4000")
+  API_INTERNAL_URL: z.string().default("http://api:4000"),
+  WEB_ORIGIN: z.string().default("https://comm.copilot-send-mes.ru")
 });
 
 const env = envSchema.parse(process.env);
 const bot = new Telegraf(env.TELEGRAM_VERIFY_BOT_TOKEN);
 
 function extractVerifyToken(text: string): string | null {
-  const match = text.match(/^\/start\s+verify_([a-zA-Z0-9_-]+)$/);
-  return match ? match[1] : null;
+  const cleaned = text.trim();
+  if (!cleaned.startsWith("/start")) return null;
+  const payload = cleaned.slice("/start".length).trim();
+  if (!payload || !payload.startsWith("verify_")) return null;
+  const token = payload.slice("verify_".length).trim();
+  return token || null;
 }
 
 bot.start(async (ctx) => {
   const token = extractVerifyToken(ctx.message.text || "");
+  const backToDashboardButton = Markup.inlineKeyboard([
+    [Markup.button.url("Вернуться в кабинет", `${env.WEB_ORIGIN}/dashboard`)]
+  ]);
+
   if (!token) {
-    await ctx.reply("Используйте ссылку из личного кабинета, чтобы подтвердить Telegram.");
+    await ctx.reply(
+      "Откройте подтверждение из личного кабинета и нажмите кнопку “Перейти в бота”.",
+      backToDashboardButton
+    );
     return;
   }
 
@@ -48,13 +60,21 @@ bot.start(async (ctx) => {
     });
 
     if (!response.ok) {
-      await ctx.reply("Ссылка устарела или недействительна. Вернитесь в кабинет и получите новую ссылку.");
+      console.warn("[verify-bot] verification failed", { status: response.status, telegramId });
+      await ctx.reply(
+        "Ссылка устарела или недействительна. Вернитесь в кабинет и получите новую ссылку.",
+        backToDashboardButton
+      );
       return;
     }
 
-    await ctx.reply("Готово, Telegram подтверждён. Вернитесь в кабинет.");
+    await ctx.reply(
+      "Готово! Telegram подтверждён.\n\nТеперь вернитесь в кабинет и продолжите настройку.",
+      backToDashboardButton
+    );
   } catch {
-    await ctx.reply("Не удалось подтвердить Telegram. Попробуйте снова через минуту.");
+    console.error("[verify-bot] complete request failed", { telegramId });
+    await ctx.reply("Не удалось подтвердить Telegram. Попробуйте снова через минуту.", backToDashboardButton);
   }
 });
 

@@ -196,6 +196,21 @@ export default function DashboardHomePage() {
                     const started = await startTelegramVerification();
                     setVerifyLinkExpiresAt(started.expiresAt);
                     window.open(started.botUrl, "_blank", "noopener,noreferrer");
+                    const startedAt = Date.now();
+                    const pollInterval = 2500;
+                    const maxPollMs = 2 * 60 * 1000;
+
+                    const poll = async () => {
+                      const latestMe = await getMe();
+                      setMe(latestMe);
+                      if (latestMe.user.telegramVerifiedAt) return;
+                      if (Date.now() - startedAt >= maxPollMs) return;
+                      setTimeout(() => {
+                        poll().catch(() => undefined);
+                      }, pollInterval);
+                    };
+
+                    poll().catch(() => undefined);
                   } catch (e) {
                     setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR"));
                   }
