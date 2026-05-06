@@ -73,9 +73,14 @@ enum TelegramLoginSessionStatus {
 
 model User {
   id              String            @id @default(cuid())
+  email           String?           @unique
+  passwordHash    String?
   telegramId      String?           @unique
   username        String?
   firstName       String?
+  telegramVerifiedAt DateTime?
+  telegramVerificationToken String? @unique
+  telegramVerificationExpiresAt DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")

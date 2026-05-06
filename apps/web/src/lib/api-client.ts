@@ -7,6 +7,34 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export type AuthUser = {
+  id: string;
+  email: string | null;
+  telegramId: string | null;
+  username: string | null;
+  firstName: string | null;
+  telegramVerifiedAt: string | null;
+};
+
+export type AuthMeResponse = {
+  user: AuthUser;
+  workspace: {
+    id: string;
+    name: string;
+  };
+  role?: "owner";
+};
+
 export type AccountSafetyState = {
   id: string;
   telegramAccountId: string;
@@ -264,8 +292,19 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `API request failed: ${response.status}`);
+    let message = `API request failed: ${response.status}`;
+    try {
+      const json = (await response.json()) as { error?: string };
+      if (json?.error) {
+        message = json.error;
+      }
+    } catch {
+      const body = await response.text();
+      if (body) {
+        message = body;
+      }
+    }
+    throw new ApiError(response.status, message);
   }
 
   return (await response.json()) as T;
@@ -331,3 +370,15 @@ export const deleteKnowledgeBase = (id: string) => apiFetch<{ ok: true }>(`/know
 export const getBillingStatus = () => apiFetch<BillingStatus>("/billing/status");
 export const devActivateBilling = () => apiFetch<{ ok: true; workspace: { id: string; plan: string; subscriptionStatus: string } }>("/billing/dev-activate", { method: "POST" });
 export const getOnboardingStatus = () => apiFetch<OnboardingStatus>("/workspaces/onboarding-status");
+
+export const registerWithEmail = (input: { email: string; password: string }) =>
+  apiFetch<AuthMeResponse>("/auth/register", { method: "POST", body: JSON.stringify(input) });
+
+export const loginWithEmail = (input: { email: string; password: string }) =>
+  apiFetch<AuthMeResponse>("/auth/login", { method: "POST", body: JSON.stringify(input) });
+
+export const logoutSession = () => apiFetch<{ ok: true }>("/auth/logout", { method: "POST" });
+export const getMe = () => apiFetch<AuthMeResponse>("/auth/me");
+
+export const startTelegramVerification = () =>
+  apiFetch<{ botUrl: string; expiresAt: string }>("/auth/telegram-verification/start", { method: "POST" });

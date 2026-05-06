@@ -88,6 +88,10 @@ export default function AccountsPage() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-600">Подключайте только аккаунты, которыми реально пользуетесь. Не отправляйте много комментариев в первый день.</p>
+      <p className="text-sm text-slate-600">
+        Здесь подключается рабочий Telegram-аккаунт для мониторинга каналов и отправки комментариев. Это не то же
+        самое, что Telegram-подтверждение профиля.
+      </p>
       {error ? <ErrorAlert message={error} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-2">

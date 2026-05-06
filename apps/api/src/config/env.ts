@@ -12,7 +12,13 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_SECRET: z.string().optional(),
   TELEGRAM_AUTH_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_SESSION_ENCRYPTION_KEY: z.string().optional()
+  ENABLE_LEGACY_TELEGRAM_AUTH: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TELEGRAM_SESSION_ENCRYPTION_KEY: z.string().optional(),
+  TELEGRAM_VERIFY_BOT_USERNAME: z.string().optional(),
+  INTERNAL_BOT_SECRET: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);
@@ -39,4 +45,12 @@ export function getTelegramSessionEncryptionKeyOrThrow(): string {
   }
 
   return key;
+}
+
+export function getInternalBotSecretOrThrow(): string {
+  const secret = env.INTERNAL_BOT_SECRET;
+  if (!secret || !secret.trim()) {
+    throw new Error("INTERNAL_BOT_SECRET is missing. Please set it for internal bot verification endpoint.");
+  }
+  return secret;
 }

@@ -151,6 +151,26 @@ services:
       expert-comment-redis:
         condition: service_healthy
 
+  expert-comment-verify-bot:
+    container_name: expert-comment-verify-bot
+    build:
+      context: .
+      dockerfile: ./infra/docker/verify-bot.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      API_INTERNAL_URL: ${API_INTERNAL_URL}
+      INTERNAL_BOT_SECRET: ${INTERNAL_BOT_SECRET}
+      TELEGRAM_VERIFY_BOT_TOKEN: ${TELEGRAM_VERIFY_BOT_TOKEN}
+      TELEGRAM_VERIFY_BOT_USERNAME: ${TELEGRAM_VERIFY_BOT_USERNAME}
+      NODE_ENV: ${NODE_ENV}
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-api:
+        condition: service_healthy
+
 volumes:
   expert_comment_postgres_data:
     name: expert_comment_postgres_data

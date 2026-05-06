@@ -6,6 +6,7 @@ import { env } from "./config/env";
 import authRoutes from "./modules/auth/routes";
 import billingRoutes from "./modules/billing/routes";
 import commentsRoutes from "./modules/comments/routes";
+import internalAuthRoutes from "./modules/internal-auth/routes";
 import knowledgeBaseRoutes from "./modules/knowledge-base/routes";
 import monitoredChannelsRoutes from "./modules/monitored-channels/routes";
 import telegramAccountsRoutes from "./modules/telegram-accounts/routes";
@@ -28,6 +29,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRoutes);
+app.use("/internal/auth", internalAuthRoutes);
 app.use("/workspaces", requireAuth, workspacesRoutes);
 app.use("/telegram-accounts", requireAuth, telegramAccountsRoutes);
 app.use("/monitored-channels", requireAuth, monitoredChannelsRoutes);

@@ -13,10 +13,12 @@ import {
   createKnowledgeBase,
   createMonitoredChannel,
   getOnboardingStatus,
+  getMe,
   listKnowledgeBase,
   listMonitoredChannels,
   listTelegramAccounts,
   startMonitoringChannel,
+  startTelegramVerification,
   updateMonitoredChannel,
   updateTelegramAccount,
   type ChannelHealth,
@@ -38,6 +40,8 @@ export default function DashboardHomePage() {
   const [channels, setChannels] = useState<MonitoredChannel[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeBaseItem[]>([]);
   const [diagnostics, setDiagnostics] = useState<ChannelHealth[]>([]);
+  const [me, setMe] = useState<Awaited<ReturnType<typeof getMe>> | null>(null);
+  const [verifyLinkExpiresAt, setVerifyLinkExpiresAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [proxyHost, setProxyHost] = useState("");
@@ -50,17 +54,19 @@ export default function DashboardHomePage() {
   const [kbContent, setKbContent] = useState("");
 
   async function load() {
-    const [onb, accs, chs, kb] = await Promise.all([
+    const [onb, accs, chs, kb, meRes] = await Promise.all([
       getOnboardingStatus(),
       listTelegramAccounts(),
       listMonitoredChannels(),
-      listKnowledgeBase()
+      listKnowledgeBase(),
+      getMe()
     ]);
 
     setOnboarding(onb);
     setAccounts(accs);
     setChannels(chs);
     setKnowledge(kb);
+    setMe(meRes);
 
     const health = await Promise.all(chs.map((c) => checkMonitoredChannelHealth(c.id).catch(() => null)));
     setDiagnostics(health.filter(Boolean) as ChannelHealth[]);
@@ -164,6 +170,46 @@ export default function DashboardHomePage() {
   return (
     <div className="space-y-6">
       {error ? <ErrorAlert message={error} /> : null}
+
+      <Card className="space-y-3">
+        <h2 className="text-xl font-semibold">Подтверждение Telegram</h2>
+        {me?.user.telegramVerifiedAt ? (
+          <p className="text-sm text-emerald-700">
+            Telegram подтверждён{me.user.username ? `: @${me.user.username}` : ""}.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-slate-600">
+              Telegram не подтверждён. Подтвердите Telegram, чтобы получать уведомления и завершить настройку аккаунта.
+            </p>
+            <p className="text-sm text-slate-600">
+              Это подтверждение вашего профиля и канал для уведомлений.
+            </p>
+            <p className="text-sm text-slate-600">
+              Рабочий Telegram-аккаунт, от имени которого система пишет комментарии, подключается отдельно в разделе
+              “Аккаунты” через QR-код.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  try {
+                    const started = await startTelegramVerification();
+                    setVerifyLinkExpiresAt(started.expiresAt);
+                    window.open(started.botUrl, "_blank", "noopener,noreferrer");
+                  } catch (e) {
+                    setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR"));
+                  }
+                }}
+              >
+                Перейти в бота
+              </Button>
+            </div>
+            {verifyLinkExpiresAt ? (
+              <p className="text-xs text-slate-500">Ссылка действует до: {new Date(verifyLinkExpiresAt).toLocaleString()}</p>
+            ) : null}
+          </>
+        )}
+      </Card>
 
       <Card>
         <h2 className="text-xl font-semibold">Setup Wizard</h2>
