@@ -65,19 +65,28 @@ sudo systemctl reload nginx
 sudo certbot --nginx -d comm.copilot-send-mes.ru
 ```
 
-## 8. BotFather (Telegram Login Widget)
+## 8. Verify bot
 
-Для бота авторизации задайте домен:
+Заполните в `.env.production`:
 
-- `comm.copilot-send-mes.ru`
+- `TELEGRAM_VERIFY_BOT_USERNAME`
+- `TELEGRAM_VERIFY_BOT_TOKEN`
+- `INTERNAL_BOT_SECRET`
 
-через BotFather (`/setdomain`).
+Опционально для нестабильного доступа к Telegram только на этапе QR-login:
+
+- `DEFAULT_QR_LOGIN_PROXY_ENABLED`
+- `DEFAULT_QR_LOGIN_PROXY_TYPE`
+- `DEFAULT_QR_LOGIN_PROXY_HOST`
+- `DEFAULT_QR_LOGIN_PROXY_PORT`
+- `DEFAULT_QR_LOGIN_PROXY_USERNAME`
+- `DEFAULT_QR_LOGIN_PROXY_PASSWORD`
 
 ## 9. Проверка
 
 1. Открыть `https://comm.copilot-send-mes.ru`
 2. Проверить `/login`
-3. Проверить Telegram Login Widget
+3. Проверить email/password login и Telegram verify-bot
 4. Проверить API health: `https://comm.copilot-send-mes.ru/api/health`
 5. Проверить логи контейнеров
 

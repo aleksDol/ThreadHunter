@@ -115,7 +115,8 @@ export default function AccountsPage() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-600">
-        Здесь подключается рабочий Telegram-аккаунт для мониторинга каналов и отправки комментариев. Это не то же самое, что Telegram-подтверждение профиля.
+        Здесь подключается рабочий Telegram-аккаунт для мониторинга каналов и отправки комментариев. Это не то же
+        самое, что Telegram-подтверждение профиля.
       </p>
 
       {error ? <ErrorAlert message={error} /> : null}
@@ -131,14 +132,20 @@ export default function AccountsPage() {
           </Button>
         </div>
         <p className="text-sm text-slate-600">
-          Это не Telegram-подтверждение профиля. Это отдельный рабочий аккаунт, от имени которого будут публиковаться комментарии.
+          Это не Telegram-подтверждение профиля. Это отдельный рабочий аккаунт, от имени которого будут публиковаться
+          комментарии.
         </p>
       </Card>
 
       {qrVisible ? (
         <Card className="space-y-4">
           <h3 className="text-xl font-semibold">Отсканируйте QR-код в Telegram</h3>
-          <p className="text-sm text-slate-600">Telegram → Настройки → Устройства → Подключить устройство</p>
+          <p className="text-sm text-slate-600">Telegram -&gt; Настройки -&gt; Устройства -&gt; Подключить устройство</p>
+          <p className="text-sm text-slate-600">
+            Если у сервера нет прямого доступа к Telegram, для генерации QR может использоваться технический proxy
+            сервиса. Для мониторинга и отправки комментариев используется только proxy, указанный в настройках
+            аккаунта.
+          </p>
 
           <div className="flex flex-col items-start gap-3">
             {connectState?.qrUrl ? (
@@ -187,7 +194,9 @@ export default function AccountsPage() {
             <Card key={item.id} className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-medium">{item.username ? `@${item.username}` : item.displayName || "Рабочий аккаунт"}</p>
+                  <p className="font-medium">
+                    {item.username ? `@${item.username}` : item.displayName || "Рабочий аккаунт"}
+                  </p>
                   <p className="text-sm text-slate-600">
                     Статус: {item.status === "CONNECTED" ? "подключён" : item.status.toLowerCase()}
                   </p>
@@ -195,9 +204,7 @@ export default function AccountsPage() {
                     <p className="text-xs text-slate-500">Подключён: {new Date(item.connectedAt).toLocaleString()}</p>
                   ) : null}
                 </div>
-                <Badge variant={item.status === "CONNECTED" ? "success" : "warning"}>
-                  {item.status}
-                </Badge>
+                <Badge variant={item.status === "CONNECTED" ? "success" : "warning"}>{item.status}</Badge>
               </div>
 
               <div className="space-y-2">
@@ -238,7 +245,8 @@ export default function AccountsPage() {
                     }}
                   >
                     <p className="md:col-span-2 text-sm text-slate-600">
-                      Proxy необязателен. Добавьте его, если хотите разделить трафик аккаунтов или повысить стабильность.
+                      Proxy необязателен. Если не указать proxy, мониторинг и отправка будут выполняться напрямую с
+                      сервера.
                     </p>
                     <Input placeholder="host" value={proxyHost} onChange={(e) => setProxyHost(e.target.value)} />
                     <Input placeholder="port" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} />
@@ -266,4 +274,3 @@ export default function AccountsPage() {
     </div>
   );
 }
-

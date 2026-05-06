@@ -18,8 +18,9 @@ SaaS-платформа для автоматизированного экспе
 
 Для production-like login дополнительно:
 
-- `TELEGRAM_AUTH_BOT_TOKEN`
-- `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_VERIFY_BOT_TOKEN`
+- `TELEGRAM_VERIFY_BOT_USERNAME`
+- `INTERNAL_BOT_SECRET`
 
 ### 2) Запуск инфраструктуры
 
@@ -51,9 +52,21 @@ npm run db:migrate
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
 - `TELEGRAM_SESSION_ENCRYPTION_KEY`
+- `TELEGRAM_VERIFY_BOT_TOKEN`
+- `TELEGRAM_VERIFY_BOT_USERNAME`
+- `INTERNAL_BOT_SECRET`
 - `JWT_SECRET`
 - `DATABASE_URL`
 - `REDIS_URL`
+
+Опционально для нестабильного доступа сервера к Telegram (только QR-login):
+
+- `DEFAULT_QR_LOGIN_PROXY_ENABLED`
+- `DEFAULT_QR_LOGIN_PROXY_TYPE`
+- `DEFAULT_QR_LOGIN_PROXY_HOST`
+- `DEFAULT_QR_LOGIN_PROXY_PORT`
+- `DEFAULT_QR_LOGIN_PROXY_USERNAME`
+- `DEFAULT_QR_LOGIN_PROXY_PASSWORD`
 
 Также проверьте:
 
@@ -94,6 +107,7 @@ npm run db:migrate
 - проверьте `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`
 - проверьте `TELEGRAM_SESSION_ENCRYPTION_KEY`
 - проверьте логи `telegram-worker`
+- если сервер не достукивается до Telegram DC, включите `DEFAULT_QR_LOGIN_PROXY_*`
 
 ### Канал не мониторится
 

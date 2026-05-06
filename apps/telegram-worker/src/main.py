@@ -152,6 +152,17 @@ def parse_database_url(database_url: str) -> dict[str, Any]:
     }
 
 
+def build_proxy_config(
+    host: Optional[str],
+    port: Optional[int],
+    username: Optional[str],
+    password: Optional[str],
+) -> Optional[tuple[Any, ...]]:
+    if not host or not port:
+        return None
+    return ("socks5", host, int(port), True, username, password)
+
+
 def parse_login_payload(raw: str) -> Optional[dict[str, Any]]:
     try:
         payload = json.loads(raw)
@@ -412,7 +423,15 @@ def insert_opportunity(
     return opportunity_id if inserted else None
 
 
-async def process_login_job(conn: Any, job: dict[str, Any], api_id: int, api_hash: str, enc_key: bytes) -> None:
+async def process_login_job(
+    conn: Any,
+    job: dict[str, Any],
+    api_id: int,
+    api_hash: str,
+    enc_key: bytes,
+    default_qr_proxy_enabled: bool,
+    default_qr_proxy: Optional[tuple[Any, ...]],
+) -> None:
     session_id = str(job["loginSessionId"])
     account_id = str(job["telegramAccountId"])
 
@@ -437,16 +456,23 @@ async def process_login_job(conn: Any, job: dict[str, Any], api_id: int, api_has
         update_account(conn, account_id, status="FAILED", connectionError="QR login expired")
         return
 
+    account_proxy = build_proxy_config(
+        payload.get("proxyHost"),
+        payload.get("proxyPort"),
+        payload.get("proxyUsername"),
+        payload.get("proxyPassword"),
+    )
+
     proxy = None
-    if payload.get("proxyHost") and payload.get("proxyPort"):
-        proxy = (
-            "socks5",
-            payload["proxyHost"],
-            int(payload["proxyPort"]),
-            True,
-            payload.get("proxyUsername"),
-            payload.get("proxyPassword"),
-        )
+    proxy_mode = "direct"
+    if account_proxy:
+        proxy = account_proxy
+        proxy_mode = "account_proxy"
+    elif default_qr_proxy_enabled and default_qr_proxy:
+        proxy = default_qr_proxy
+        proxy_mode = "default_qr_proxy"
+
+    print(f"[telegram-worker] QR login proxy mode: {proxy_mode}")
 
     client = TelegramClient(StringSession(), api_id, api_hash, proxy=proxy)
 
@@ -548,16 +574,12 @@ async def process_monitor_job(
         update_channel(conn, channel_id, syncError=f"Session decrypt failed: {str(exc)[:300]}")
         return
 
-    proxy = None
-    if data.get("proxyHost") and data.get("proxyPort"):
-        proxy = (
-            "socks5",
-            data["proxyHost"],
-            int(data["proxyPort"]),
-            True,
-            data.get("proxyUsername"),
-            data.get("proxyPassword"),
-        )
+    proxy = build_proxy_config(
+        data.get("proxyHost"),
+        data.get("proxyPort"),
+        data.get("proxyUsername"),
+        data.get("proxyPassword"),
+    )
 
     client = TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
 
@@ -681,16 +703,12 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
         mark_dispatch_failed(conn, dispatch_job_id, f"Session invalid: {str(exc)[:200]}")
         return
 
-    proxy = None
-    if ctx.get("proxyHost") and ctx.get("proxyPort"):
-        proxy = (
-            "socks5",
-            ctx["proxyHost"],
-            int(ctx["proxyPort"]),
-            True,
-            ctx.get("proxyUsername"),
-            ctx.get("proxyPassword"),
-        )
+    proxy = build_proxy_config(
+        ctx.get("proxyHost"),
+        ctx.get("proxyPort"),
+        ctx.get("proxyUsername"),
+        ctx.get("proxyPassword"),
+    )
 
     client = TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
 
@@ -774,6 +792,11 @@ def main() -> None:
     api_id_raw = os.getenv("TELEGRAM_API_ID", "")
     api_hash = os.getenv("TELEGRAM_API_HASH", "")
     enc_raw = os.getenv("TELEGRAM_SESSION_ENCRYPTION_KEY", "")
+    default_qr_proxy_enabled = os.getenv("DEFAULT_QR_LOGIN_PROXY_ENABLED", "false").lower() == "true"
+    default_qr_proxy_host = os.getenv("DEFAULT_QR_LOGIN_PROXY_HOST")
+    default_qr_proxy_port_raw = os.getenv("DEFAULT_QR_LOGIN_PROXY_PORT")
+    default_qr_proxy_username = os.getenv("DEFAULT_QR_LOGIN_PROXY_USERNAME")
+    default_qr_proxy_password = os.getenv("DEFAULT_QR_LOGIN_PROXY_PASSWORD")
 
     if not redis_url or not database_url:
         raise RuntimeError("REDIS_URL and DATABASE_URL are required")
@@ -784,6 +807,12 @@ def main() -> None:
 
     api_id = int(api_id_raw)
     enc_key = parse_key(enc_raw)
+    default_qr_proxy_port = int(default_qr_proxy_port_raw) if default_qr_proxy_port_raw else None
+    default_qr_proxy = build_proxy_config(
+        default_qr_proxy_host, default_qr_proxy_port, default_qr_proxy_username, default_qr_proxy_password
+    )
+    if default_qr_proxy_enabled and not default_qr_proxy:
+        print("[telegram-worker] DEFAULT_QR_LOGIN_PROXY_ENABLED=true but proxy settings are incomplete; fallback to direct")
 
     r = redis.Redis.from_url(redis_url, decode_responses=True)
     conn = psycopg2.connect(**parse_database_url(database_url))
@@ -800,7 +829,17 @@ def main() -> None:
                 _, raw = login_item
                 payload = parse_login_payload(raw)
                 if payload:
-                    asyncio.run(process_login_job(conn, payload, api_id, api_hash, enc_key))
+                    asyncio.run(
+                        process_login_job(
+                            conn,
+                            payload,
+                            api_id,
+                            api_hash,
+                            enc_key,
+                            default_qr_proxy_enabled,
+                            default_qr_proxy,
+                        )
+                    )
 
             monitor_item = r.blpop(MONITOR_QUEUE_NAME, timeout=1)
             if monitor_item:
