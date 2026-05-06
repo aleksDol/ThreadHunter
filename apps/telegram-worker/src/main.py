@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from telethon.sessions import StringSession
 
 load_dotenv()
@@ -520,14 +520,18 @@ async def process_login_job(
 
         print(f"[telegram-worker] account connected: {account_id}")
     except Exception as exc:
-        message = str(exc)
+        if isinstance(exc, SessionPasswordNeededError):
+            message = "Two-step verification password is enabled on this Telegram account. Disable 2FA password or use an account without cloud password for QR login."
+        else:
+            raw = str(exc).strip()
+            message = raw if raw else f"{exc.__class__.__name__}: no error message"
         if "expired" in message.lower() or "timeout" in message.lower():
             update_login_session(conn, session_id, status="EXPIRED", error="QR login expired")
             update_account(conn, account_id, status="FAILED", connectionError="QR login expired")
         else:
             update_login_session(conn, session_id, status="FAILED", error=message[:1000])
             update_account(conn, account_id, status="FAILED", connectionError=message[:1000])
-        print(f"[telegram-worker] login failed for {account_id}: {message}")
+        print(f"[telegram-worker] login failed for {account_id}: {message} | exc={repr(exc)}")
     finally:
         await client.disconnect()
 
