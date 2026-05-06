@@ -214,6 +214,7 @@ router.get("/generated", async (req, res) => {
     variant: item.variant,
     generationReason: item.generationReason,
     qualityScore: item.qualityScore,
+    commentIntent: (item as any).commentIntent ?? null,
     safetyStatus: item.safetyStatus,
     safetyReason: item.safetyReason,
     opportunity: item.opportunity,

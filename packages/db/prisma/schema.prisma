@@ -109,6 +109,7 @@ model Workspace {
   subscriptionStatus    String                 @default("trialing")
   commentLimit          Int                    @default(20)
   commentsSentCount     Int                    @default(0)
+  neutralCommentsEnabled Boolean               @default(false)
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   owner                 User                   @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
@@ -305,6 +306,7 @@ model CommentOpportunity {
   commentType        String?
   keyTopic           String?
   spamRiskReason     String?
+  commentIntent      String?
   relevanceScore     Float?
   shouldComment      Boolean?
   riskLevel          String?
@@ -328,6 +330,7 @@ model GeneratedComment {
   variant          String?
   generationReason String?
   qualityScore     Float?
+  commentIntent    String?
   safetyStatus     String?
   safetyReason     String?
   createdAt        DateTime               @default(now())

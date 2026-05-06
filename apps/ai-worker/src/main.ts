@@ -56,6 +56,7 @@ const aiProfilePayloadSchema = z.object({
 
 const aiResultSchema = z.object({
   shouldComment: z.boolean(),
+  commentIntent: z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]),
   relevanceScore: z.number().min(0).max(1),
   riskLevel: z.enum(["low", "medium", "high"]),
   expertAngle: z.string(),
@@ -166,13 +167,13 @@ async function enqueueGeneration(workspaceId: string, opportunityId: string): Pr
 }
 
 async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>): Promise<void> {
-  const opportunity = await prisma.commentOpportunity.findFirst({
+  const opportunity = (await prisma.commentOpportunity.findFirst({
     where: { id: payload.opportunityId, workspaceId: payload.workspaceId },
     include: {
       monitoredChannel: true,
       workspace: true
     }
-  });
+  })) as any;
 
   if (!opportunity) return;
   if (opportunity.analysisStatus !== OpportunityAnalysisStatus.PENDING) return;
@@ -196,14 +197,21 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
   const ownedChannelContext = await getOwnedChannelsPromptContext(opportunity.workspaceId);
 
   const prompt = [
-    "You are an assistant that evaluates whether a Telegram post should receive an expert comment.",
+    "You are an assistant that evaluates whether a Telegram post should receive a comment.",
     "Return STRICT JSON only with keys:",
-    "shouldComment, relevanceScore, riskLevel, expertAngle, analysisReason, commentType, keyTopic, spamRiskReason.",
+    "shouldComment, commentIntent, relevanceScore, riskLevel, expertAngle, analysisReason, commentType, keyTopic, spamRiskReason.",
+    "Allowed commentIntent values: expert_comment, neutral_opinion, clarifying_question, skip.",
     "Rules:",
     "- shouldComment=false if post is not relevant to workspace niche/knowledge base.",
     "- shouldComment=false if response would require direct self-promotion.",
     "- riskLevel high when likely to look like spam.",
     "- relevanceScore must be between 0 and 1.",
+    `neutralCommentsEnabled: ${opportunity.workspace.neutralCommentsEnabled ? "true" : "false"}`,
+    "- expert_comment: strong practical expert angle.",
+    "- neutral_opinion: relevant short meaningful opinion without sales.",
+    "- clarifying_question: one natural question that continues discussion.",
+    "- skip: if forced, risky, irrelevant, or low-value.",
+    "- If neutralCommentsEnabled=false, neutral_opinion and clarifying_question must become skip.",
     "Workspace: " + opportunity.workspace.name,
     "Channel: @" + opportunity.monitoredChannel.username,
     "Post:\n" + opportunity.postText,
@@ -234,17 +242,25 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
     }
 
     const result = parsed.data;
-    const analysisStatus = result.shouldComment
+    const neutralEnabled = Boolean(opportunity.workspace?.neutralCommentsEnabled);
+    let finalIntent = result.commentIntent;
+    if (!neutralEnabled && (finalIntent === "neutral_opinion" || finalIntent === "clarifying_question")) {
+      finalIntent = "skip";
+    }
+
+    const shouldComment = result.shouldComment && finalIntent !== "skip";
+    const analysisStatus = shouldComment
       ? OpportunityAnalysisStatus.ANALYZED
       : OpportunityAnalysisStatus.SKIPPED;
-    const status = result.shouldComment ? OpportunityStatus.NEW : OpportunityStatus.SKIPPED;
+    const status = shouldComment ? OpportunityStatus.NEW : OpportunityStatus.SKIPPED;
 
-    await prisma.commentOpportunity.update({
+    await prismaAny.commentOpportunity.update({
       where: { id: opportunity.id },
       data: {
         analysisStatus,
         status,
-        shouldComment: result.shouldComment,
+        shouldComment,
+        commentIntent: finalIntent,
         relevanceScore: result.relevanceScore,
         riskLevel: result.riskLevel,
         expertAngle: result.expertAngle,
@@ -255,7 +271,19 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
       }
     });
 
-    if (result.shouldComment && result.riskLevel !== "high" && result.relevanceScore >= 0.6) {
+    const canAutoExpert = finalIntent === "expert_comment" && result.riskLevel !== "high" && result.relevanceScore >= 0.7;
+    const canAutoNeutral =
+      finalIntent === "neutral_opinion" &&
+      neutralEnabled &&
+      result.riskLevel === "low" &&
+      result.relevanceScore >= 0.55;
+    const canAutoQuestion =
+      finalIntent === "clarifying_question" &&
+      neutralEnabled &&
+      result.riskLevel === "low" &&
+      result.relevanceScore >= 0.5;
+
+    if (canAutoExpert || canAutoNeutral || canAutoQuestion) {
       await enqueueGeneration(opportunity.workspaceId, opportunity.id);
     }
   } catch (error) {
@@ -265,13 +293,13 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
 }
 
 async function generateComment(payload: z.infer<typeof generationPayloadSchema>): Promise<void> {
-  const opportunity = await prisma.commentOpportunity.findFirst({
+  const opportunity = (await prisma.commentOpportunity.findFirst({
     where: { id: payload.opportunityId, workspaceId: payload.workspaceId },
     include: {
       monitoredChannel: true,
       workspace: true
     }
-  });
+  })) as any;
 
   if (!opportunity) return;
 
@@ -283,13 +311,14 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
   if (!eligible) return;
 
   if (!openai) {
-    await prisma.generatedComment.create({
+    await prismaAny.generatedComment.create({
       data: {
         workspaceId: opportunity.workspaceId,
         opportunityId: opportunity.id,
         text: "AI generation unavailable: OPENAI_API_KEY is not configured.",
         status: GeneratedCommentStatus.FAILED,
         variant: "unavailable",
+        commentIntent: opportunity.commentIntent,
         generationReason: "OPENAI_API_KEY is not configured",
         qualityScore: 0,
         safetyStatus: "FAILED",
@@ -313,7 +342,7 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
   const ownedChannelContext = await getOwnedChannelsPromptContext(opportunity.workspaceId);
 
   const prompt = [
-    "Сгенерируй экспертный комментарий на русском языке к посту Telegram.",
+    "Сгенерируй комментарий на русском языке к посту Telegram.",
     "Требования:",
     "- 300-700 символов",
     "- без прямой продажи",
@@ -322,8 +351,12 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     "- без упоминания ИИ",
     "- без банального 'полностью согласен'",
     "- конкретика по теме поста",
-    "- можно добавить один мягкий вопрос в конце при уместности",
     "Верни СТРОГО JSON с ключами: text, variant, generationReason, qualityScore.",
+    `Intent: ${opportunity.commentIntent ?? "expert_comment"}`,
+    "Intent rules:",
+    "- expert_comment: практический экспертный комментарий с конкретикой.",
+    "- neutral_opinion: короткое осмысленное мнение по теме без воды и продаж.",
+    "- clarifying_question: один естественный уточняющий вопрос по теме, без bait.",
     `Тема поста: ${opportunity.keyTopic ?? "не указана"}`,
     `Экспертный угол: ${opportunity.expertAngle ?? "не указан"}`,
     `Пост:\n${opportunity.postText}`,
@@ -343,13 +376,14 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      await prisma.generatedComment.create({
+      await prismaAny.generatedComment.create({
         data: {
           workspaceId: opportunity.workspaceId,
           opportunityId: opportunity.id,
           text: "",
           status: GeneratedCommentStatus.FAILED,
           variant: null,
+          commentIntent: opportunity.commentIntent,
           generationReason: "Empty generation response",
           qualityScore: 0,
           safetyStatus: "FAILED",
@@ -361,12 +395,13 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
 
     const parsed = generatedCommentSchema.safeParse(safeJsonParse(content));
     if (!parsed.success) {
-      await prisma.generatedComment.create({
+      await prismaAny.generatedComment.create({
         data: {
           workspaceId: opportunity.workspaceId,
           opportunityId: opportunity.id,
           text: "",
           status: GeneratedCommentStatus.FAILED,
+          commentIntent: opportunity.commentIntent,
           generationReason: "Generation JSON schema failed",
           qualityScore: 0,
           safetyStatus: "FAILED",
@@ -379,13 +414,14 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     const generated = parsed.data;
     const safety = passesSafety(generated.text);
 
-    await prisma.generatedComment.create({
+    await prismaAny.generatedComment.create({
       data: {
         workspaceId: opportunity.workspaceId,
         opportunityId: opportunity.id,
         text: generated.text,
         status: safety.passed ? GeneratedCommentStatus.DRAFT : GeneratedCommentStatus.REJECTED,
         variant: generated.variant,
+        commentIntent: opportunity.commentIntent,
         generationReason: generated.generationReason,
         qualityScore: generated.qualityScore,
         safetyStatus: safety.passed ? "PASSED" : "FAILED",
@@ -394,12 +430,13 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Generation error";
-    await prisma.generatedComment.create({
+    await prismaAny.generatedComment.create({
       data: {
         workspaceId: opportunity.workspaceId,
         opportunityId: opportunity.id,
         text: "",
         status: GeneratedCommentStatus.FAILED,
+        commentIntent: opportunity.commentIntent,
         generationReason: reason,
         qualityScore: 0,
         safetyStatus: "FAILED",

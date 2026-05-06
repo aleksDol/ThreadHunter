@@ -21,6 +21,12 @@ import { mapRawErrorToRu } from "../../../src/lib/error-messages";
 
 type UiFilter = "all" | "sent" | "failed" | "queued";
 
+function intentLabel(intent: GeneratedCommentFeedItem["commentIntent"]): string {
+  if (intent === "neutral_opinion") return "Neutral";
+  if (intent === "clarifying_question") return "Question";
+  return "Expert";
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -87,6 +93,18 @@ export default function CommentsPage() {
     }).length;
   }, [items]);
 
+  const intentStats = useMemo(() => {
+    let expert = 0;
+    let neutral = 0;
+    let question = 0;
+    for (const item of items) {
+      if (item.commentIntent === "neutral_opinion") neutral += 1;
+      else if (item.commentIntent === "clarifying_question") question += 1;
+      else expert += 1;
+    }
+    return { expert, neutral, question };
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     if (filter === "all") return items;
     return items.filter((item) => unifiedStatus(item).toLowerCase() === filter);
@@ -143,6 +161,11 @@ export default function CommentsPage() {
 
       <Card>
         <p className="text-sm text-slate-600">Сегодня отправлено: <span className="font-semibold text-slate-900">{sentToday}</span> комментариев</p>
+        <div className="mt-2 grid gap-2 text-sm text-slate-700 sm:grid-cols-3">
+          <p>Expert comments: <span className="font-semibold">{intentStats.expert}</span></p>
+          <p>Neutral comments: <span className="font-semibold">{intentStats.neutral}</span></p>
+          <p>Questions: <span className="font-semibold">{intentStats.question}</span></p>
+        </div>
       </Card>
 
       <div className="flex flex-wrap gap-2">
@@ -167,7 +190,10 @@ export default function CommentsPage() {
 
             return (
               <Card key={item.id} className="space-y-3">
-                <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
+                  <Badge variant="info">{intentLabel(item.commentIntent)}</Badge>
+                </div>
                 <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{item.text}</p>
                 <p className="text-sm text-slate-600">
                   Канал: @{item.opportunity.monitoredChannel.username}

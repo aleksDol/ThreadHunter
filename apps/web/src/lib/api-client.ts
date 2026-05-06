@@ -217,6 +217,7 @@ export type GeneratedComment = {
   variant: string | null;
   generationReason: string | null;
   qualityScore: number | null;
+  commentIntent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip" | null;
   safetyStatus: string | null;
   safetyReason: string | null;
   createdAt: string;
@@ -233,6 +234,7 @@ export type GeneratedCommentFeedItem = {
   variant: string | null;
   generationReason: string | null;
   qualityScore: number | null;
+  commentIntent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip" | null;
   safetyStatus: string | null;
   safetyReason: string | null;
   createdAt: string;
@@ -266,6 +268,10 @@ export type OnboardingStatus = {
   hasKnowledgeBase: boolean;
   hasActiveMonitoring: boolean;
   hasGeneratedComments: boolean;
+};
+
+export type WorkspaceSettings = {
+  neutralCommentsEnabled: boolean;
 };
 
 export type CommentOpportunity = {
@@ -459,6 +465,9 @@ export const getOwnedChannelContextSummary = (id: string) =>
 export const getBillingStatus = () => apiFetch<BillingStatus>("/billing/status");
 export const devActivateBilling = () => apiFetch<{ ok: true; workspace: { id: string; plan: string; subscriptionStatus: string } }>("/billing/dev-activate", { method: "POST" });
 export const getOnboardingStatus = () => apiFetch<OnboardingStatus>("/workspaces/onboarding-status");
+export const getWorkspaceSettings = () => apiFetch<WorkspaceSettings>("/workspaces/settings");
+export const updateWorkspaceSettings = (input: Partial<WorkspaceSettings>) =>
+  apiFetch<WorkspaceSettings>("/workspaces/settings", { method: "PATCH", body: JSON.stringify(input) });
 
 export const registerWithEmail = (input: { email: string; password: string }) =>
   apiFetch<AuthMeResponse>("/auth/register", { method: "POST", body: JSON.stringify(input) });

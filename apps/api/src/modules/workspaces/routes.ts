@@ -1,8 +1,14 @@
 import { Router } from "express";
 import { MonitoredChannelStatus, TelegramAccountStatus } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../../config/prisma";
 
 const router = Router();
+const prismaAny = prisma as any;
+
+const settingsPatchSchema = z.object({
+  neutralCommentsEnabled: z.boolean().optional()
+});
 
 router.get("/", (req, res) => {
   res.json({ module: "workspaces", status: "ok", auth: req.auth });
@@ -36,6 +42,37 @@ router.get("/onboarding-status", async (req, res) => {
     hasActiveMonitoring: activeMonitoring > 0,
     hasGeneratedComments: generated > 0
   });
+});
+
+router.get("/settings", async (req, res) => {
+  const workspaceId = req.auth!.workspaceId;
+  const workspace = await prismaAny.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { neutralCommentsEnabled: true }
+  });
+
+  res.json({
+    neutralCommentsEnabled: workspace?.neutralCommentsEnabled ?? false
+  });
+});
+
+router.patch("/settings", async (req, res) => {
+  const parsed = settingsPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  const workspaceId = req.auth!.workspaceId;
+  const updated = await prismaAny.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      neutralCommentsEnabled: parsed.data.neutralCommentsEnabled
+    },
+    select: { neutralCommentsEnabled: true }
+  });
+
+  res.json(updated);
 });
 
 export default router;
