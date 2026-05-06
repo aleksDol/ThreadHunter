@@ -1,0 +1,7 @@
+ALTER TABLE "Workspace"
+ADD COLUMN "plan" TEXT NOT NULL DEFAULT 'trial',
+ADD COLUMN "trialStartedAt" TIMESTAMP(3),
+ADD COLUMN "trialEndsAt" TIMESTAMP(3),
+ADD COLUMN "subscriptionStatus" TEXT NOT NULL DEFAULT 'trialing',
+ADD COLUMN "commentLimit" INTEGER NOT NULL DEFAULT 20,
+ADD COLUMN "commentsSentCount" INTEGER NOT NULL DEFAULT 0;

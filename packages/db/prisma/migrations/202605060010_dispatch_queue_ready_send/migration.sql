@@ -1,0 +1,1 @@
+ALTER TABLE "DispatchJob" ADD COLUMN "queuedAt" TIMESTAMP(3);

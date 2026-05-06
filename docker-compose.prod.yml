@@ -1,0 +1,163 @@
+﻿name: expert-comment
+
+services:
+  expert-comment-postgres:
+    container_name: expert-comment-postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - expert_comment_postgres_data:/var/lib/postgresql/data
+    networks:
+      - expert_comment_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  expert-comment-redis:
+    container_name: expert-comment-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - expert_comment_redis_data:/data
+    networks:
+      - expert_comment_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  expert-comment-api:
+    container_name: expert-comment-api
+    build:
+      context: .
+      dockerfile: ./infra/docker/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      API_PORT: ${API_PORT}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      NODE_ENV: ${NODE_ENV}
+    command: sh -lc "npm run dev"
+    ports:
+      - "127.0.0.1:${API_HOST_PORT}:${API_PORT}"
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-postgres:
+        condition: service_healthy
+      expert-comment-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${API_PORT}/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  expert-comment-web:
+    container_name: expert-comment-web
+    build:
+      context: .
+      dockerfile: ./infra/docker/web.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      WEB_PORT: ${WEB_PORT}
+      NODE_ENV: ${NODE_ENV}
+    command: sh -lc "npm run build && npm run start"
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT}:${WEB_PORT}"
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${WEB_PORT} >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  expert-comment-telegram-worker:
+    container_name: expert-comment-telegram-worker
+    build:
+      context: .
+      dockerfile: ./infra/docker/telegram-worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: ${NODE_ENV}
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-postgres:
+        condition: service_healthy
+      expert-comment-redis:
+        condition: service_healthy
+
+  expert-comment-ai-worker:
+    container_name: expert-comment-ai-worker
+    build:
+      context: .
+      dockerfile: ./infra/docker/ai-worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: ${NODE_ENV}
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-postgres:
+        condition: service_healthy
+      expert-comment-redis:
+        condition: service_healthy
+
+  expert-comment-dispatch-worker:
+    container_name: expert-comment-dispatch-worker
+    build:
+      context: .
+      dockerfile: ./infra/docker/dispatch-worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: ${NODE_ENV}
+    networks:
+      - expert_comment_network
+    depends_on:
+      expert-comment-postgres:
+        condition: service_healthy
+      expert-comment-redis:
+        condition: service_healthy
+
+volumes:
+  expert_comment_postgres_data:
+    name: expert_comment_postgres_data
+  expert_comment_redis_data:
+    name: expert_comment_redis_data
+
+networks:
+  expert_comment_network:
+    name: expert_comment_network
+    driver: bridge

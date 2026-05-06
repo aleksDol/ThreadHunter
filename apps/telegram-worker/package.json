@@ -1,0 +1,9 @@
+{
+  "name": "@expert-comment-ai/telegram-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "python src/main.py",
+    "lint": "echo 'No linter configured for telegram-worker yet'"
+  }
+}

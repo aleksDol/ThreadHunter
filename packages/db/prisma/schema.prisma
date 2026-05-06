@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum TelegramAccountStatus {
+  PENDING
+  CONNECTING
+  CONNECTED
+  ACTIVE
+  PAUSED
+  DISCONNECTED
+  FAILED
+}
+
+enum MonitoredChannelStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum OpportunityStatus {
+  NEW
+  REVIEWED
+  SKIPPED
+  APPROVED
+}
+
+enum OpportunityAnalysisStatus {
+  PENDING
+  ANALYZED
+  SKIPPED
+  FAILED
+}
+
+enum GeneratedCommentStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum DispatchStatus {
+  SCHEDULED
+  READY
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum TelegramLoginSessionStatus {
+  PENDING
+  QR_READY
+  WAITING_SCAN
+  CONNECTED
+  EXPIRED
+  FAILED
+}
+
+model User {
+  id              String            @id @default(cuid())
+  telegramId      String?           @unique
+  username        String?
+  firstName       String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  memberships     WorkspaceMember[]
+}
+
+model Workspace {
+  id                    String                 @id @default(cuid())
+  ownerUserId           String
+  name                  String
+  plan                  String                 @default("trial")
+  trialStartedAt        DateTime?
+  trialEndsAt           DateTime?
+  subscriptionStatus    String                 @default("trialing")
+  commentLimit          Int                    @default(20)
+  commentsSentCount     Int                    @default(0)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  owner                 User                   @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  members               WorkspaceMember[]
+  telegramAccounts      TelegramAccount[]
+  telegramLoginSessions TelegramLoginSession[]
+  monitoredChannels     MonitoredChannel[]
+  knowledgeBaseItems    KnowledgeBase[]
+  opportunities         CommentOpportunity[]
+  generatedComments     GeneratedComment[]
+  dispatchJobs          DispatchJob[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model TelegramAccount {
+  id                String                @id @default(cuid())
+  workspaceId       String
+  displayName       String?
+  phone             String?
+  status            TelegramAccountStatus
+  proxyHost         String?
+  proxyPort         Int?
+  proxyUsername     String?
+  proxyPassword     String?
+  sessionEncrypted  String?
+  telegramUserId    String?
+  username          String?
+  firstName         String?
+  lastName          String?
+  connectedAt       DateTime?
+  connectionError   String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  loginSessions     TelegramLoginSession[]
+  monitoredChannels MonitoredChannel[]
+  opportunities     CommentOpportunity[]
+  dispatchJobs      DispatchJob[]
+  safetyState       AccountSafetyState?
+}
+
+model TelegramLoginSession {
+  id                String                     @id @default(cuid())
+  workspaceId       String
+  telegramAccountId String
+  status            TelegramLoginSessionStatus
+  qrUrl             String?
+  error             String?
+  expiresAt         DateTime
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  telegramAccount TelegramAccount @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
+}
+
+model MonitoredChannel {
+  id                     String               @id @default(cuid())
+  workspaceId            String
+  telegramAccountId      String?
+  username               String
+  title                  String?
+  status                 MonitoredChannelStatus
+  niche                  String?
+  lastSeenPostId         String?
+  monitoringStartedAt    DateTime?
+  freshnessWindowMinutes Int                  @default(90)
+  lastSyncAt             DateTime?
+  syncError              String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  telegramAccount        TelegramAccount?     @relation(fields: [telegramAccountId], references: [id], onDelete: SetNull)
+  opportunities          CommentOpportunity[]
+
+  @@unique([workspaceId, username])
+}
+
+model KnowledgeBase {
+  id          String    @id @default(cuid())
+  workspaceId String
+  title       String
+  content     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CommentOpportunity {
+  id                 String                    @id @default(cuid())
+  workspaceId        String
+  monitoredChannelId String
+  telegramAccountId  String?
+  externalPostId     String
+  postText           String
+  postDate           DateTime
+  status             OpportunityStatus
+  analysisStatus     OpportunityAnalysisStatus @default(PENDING)
+  analysisReason     String?
+  commentType        String?
+  keyTopic           String?
+  spamRiskReason     String?
+  relevanceScore     Float?
+  shouldComment      Boolean?
+  riskLevel          String?
+  expertAngle        String?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  monitoredChannel   MonitoredChannel          @relation(fields: [monitoredChannelId], references: [id], onDelete: Cascade)
+  telegramAccount    TelegramAccount?          @relation(fields: [telegramAccountId], references: [id], onDelete: SetNull)
+  generatedComments  GeneratedComment[]
+
+  @@unique([workspaceId, monitoredChannelId, externalPostId])
+}
+
+model GeneratedComment {
+  id               String                 @id @default(cuid())
+  workspaceId      String
+  opportunityId    String
+  text             String
+  status           GeneratedCommentStatus
+  variant          String?
+  generationReason String?
+  qualityScore     Float?
+  safetyStatus     String?
+  safetyReason     String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  workspace        Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  opportunity      CommentOpportunity     @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  dispatchJobs     DispatchJob[]
+}
+
+model DispatchJob {
+  id                 String           @id @default(cuid())
+  workspaceId        String
+  generatedCommentId String
+  telegramAccountId  String
+  scheduledAt        DateTime
+  queuedAt           DateTime?
+  sentAt             DateTime?
+  status             DispatchStatus
+  error              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  generatedComment   GeneratedComment @relation(fields: [generatedCommentId], references: [id], onDelete: Cascade)
+  telegramAccount    TelegramAccount  @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([generatedCommentId])
+}
+
+model AccountSafetyState {
+  id                String          @id @default(cuid())
+  telegramAccountId String          @unique
+  dailyCommentCount Int             @default(0)
+  dailyLimit        Int             @default(10)
+  minDelayMinutes   Int             @default(20)
+  activeFromHour    Int             @default(9)
+  activeToHour      Int             @default(21)
+  timezone          String          @default("Europe/Amsterdam")
+  lastDailyResetAt  DateTime?
+  lastCommentAt     DateTime?
+  cooldownUntil     DateTime?
+  floodWaitUntil    DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  telegramAccount   TelegramAccount @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
+}
