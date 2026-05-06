@@ -28,6 +28,13 @@ DISPATCH_QUEUE_NAME = "telegram-dispatch:queue"
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
+def as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
 
 def parse_key(raw_key: str) -> bytes:
     try:
@@ -125,7 +132,10 @@ def is_canceled_or_expired(conn: Any, session_id: str) -> bool:
         status, expires_at = row
         if status in ("EXPIRED", "FAILED", "CONNECTED"):
             return True
-        return utc_now() > expires_at
+        expires_at_utc = as_utc(expires_at)
+        if not expires_at_utc:
+            return True
+        return utc_now() > expires_at_utc
 
 
 def parse_database_url(database_url: str) -> dict[str, Any]:
@@ -416,7 +426,13 @@ async def process_login_job(conn: Any, job: dict[str, Any], api_id: int, api_has
         print(f"[telegram-worker] login session not found: {session_id}")
         return
 
-    if utc_now() > payload["expiresAt"]:
+    expires_at = as_utc(payload.get("expiresAt"))
+    if not expires_at:
+        update_login_session(conn, session_id, status="FAILED", error="Login session has invalid expiresAt")
+        update_account(conn, account_id, status="FAILED", connectionError="Login session has invalid expiresAt")
+        return
+
+    if utc_now() > expires_at:
         update_login_session(conn, session_id, status="EXPIRED", error="QR login expired")
         update_account(conn, account_id, status="FAILED", connectionError="QR login expired")
         return
@@ -441,7 +457,7 @@ async def process_login_job(conn: Any, job: dict[str, Any], api_id: int, api_has
         update_login_session(conn, session_id, status="QR_READY", qrUrl=qr.url, error=None)
         update_login_session(conn, session_id, status="WAITING_SCAN")
 
-        timeout_seconds = int((payload["expiresAt"] - utc_now()).total_seconds())
+        timeout_seconds = int((expires_at - utc_now()).total_seconds())
         if timeout_seconds <= 0:
             raise TimeoutError("QR login expired")
 
@@ -518,7 +534,11 @@ async def process_monitor_job(
         update_channel(conn, channel_id, syncError="Monitoring is not initialized")
         return
 
-    monitoring_started_at = data["monitoringStartedAt"]
+    monitoring_started_at_raw = data.get("monitoringStartedAt")
+    monitoring_started_at = as_utc(monitoring_started_at_raw)
+    if not monitoring_started_at:
+        update_channel(conn, channel_id, syncError="Monitoring is not initialized")
+        return
     freshness_minutes = int(data.get("freshnessWindowMinutes") or 90)
     freshness_threshold = utc_now() - timedelta(minutes=freshness_minutes)
 
