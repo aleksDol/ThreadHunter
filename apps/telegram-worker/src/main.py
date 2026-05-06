@@ -23,6 +23,7 @@ LOGIN_QUEUE_NAME = "telegram-login:queue"
 MONITOR_QUEUE_NAME = "telegram-monitor:queue"
 AI_ANALYSIS_QUEUE_NAME = "ai-analysis:queue"
 DISPATCH_QUEUE_NAME = "telegram-dispatch:queue"
+OWNED_CHANNEL_SYNC_QUEUE_NAME = "owned-channel-sync:queue"
 
 
 def utc_now() -> datetime:
@@ -220,6 +221,25 @@ def parse_dispatch_payload(raw: str) -> Optional[dict[str, Any]]:
     return payload
 
 
+def parse_owned_channel_sync_payload(raw: str) -> Optional[dict[str, Any]]:
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        print("[telegram-worker] invalid owned channel payload JSON; skipping")
+        return None
+
+    required = {"type", "workspaceId", "ownedChannelId", "createdAt"}
+    if not isinstance(payload, dict) or not required.issubset(payload.keys()):
+        print("[telegram-worker] owned channel payload schema mismatch; skipping")
+        return None
+
+    if payload.get("type") != "sync_owned_channel_stats":
+        print("[telegram-worker] unsupported owned channel payload type; skipping")
+        return None
+
+    return payload
+
+
 def get_channel_with_account(conn: Any, channel_id: str, workspace_id: str) -> Optional[dict[str, Any]]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -257,6 +277,76 @@ def get_dispatch_context(conn: Any, dispatch_job_id: str) -> Optional[dict[str, 
         )
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+def get_owned_channel(conn: Any, owned_channel_id: str, workspace_id: str) -> Optional[dict[str, Any]]:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT oc.*, ta."sessionEncrypted", ta."proxyHost", ta."proxyPort", ta."proxyUsername", ta."proxyPassword", ta."status" as "accountStatus" '
+            'FROM "OwnedChannel" oc '
+            'LEFT JOIN "TelegramAccount" ta ON ta."id" = oc."telegramAccountId" '
+            'WHERE oc."id" = %s AND oc."workspaceId" = %s',
+            (owned_channel_id, workspace_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_any_connected_account_for_workspace(conn: Any, workspace_id: str) -> Optional[dict[str, Any]]:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT "id", "sessionEncrypted", "proxyHost", "proxyPort", "proxyUsername", "proxyPassword", "status" '
+            'FROM "TelegramAccount" WHERE "workspaceId" = %s AND "status" = %s '
+            'ORDER BY "connectedAt" DESC NULLS LAST, "createdAt" DESC LIMIT 1',
+            (workspace_id, "CONNECTED"),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def update_owned_channel(conn: Any, owned_channel_id: str, **fields: Any) -> None:
+    with conn.cursor() as cur:
+        sets = []
+        values = []
+        for k, v in fields.items():
+            sets.append(f'"{k}" = %s')
+            values.append(v)
+        sets.append('"updatedAt" = NOW()')
+        values.append(owned_channel_id)
+        cur.execute(f'UPDATE "OwnedChannel" SET {", ".join(sets)} WHERE "id" = %s', values)
+    conn.commit()
+
+
+def insert_owned_channel_snapshot(
+    conn: Any, workspace_id: str, owned_channel_id: str, subscriber_count: Optional[int], average_views: Optional[int], posts_sampled: int
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            'INSERT INTO "OwnedChannelStatsSnapshot" ("id", "workspaceId", "ownedChannelId", "subscriberCount", "averageViews", "postsSampled", "capturedAt") '
+            'VALUES (%s, %s, %s, %s, %s, %s, NOW())',
+            (str(uuid.uuid4()), workspace_id, owned_channel_id, subscriber_count, average_views, posts_sampled),
+        )
+    conn.commit()
+
+
+def upsert_owned_channel_post_sample(
+    conn: Any,
+    workspace_id: str,
+    owned_channel_id: str,
+    external_post_id: str,
+    text: str,
+    post_date: Optional[datetime],
+    views: Optional[int],
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            'INSERT INTO "OwnedChannelPostSample" ("id", "workspaceId", "ownedChannelId", "externalPostId", "text", "postDate", "views", "createdAt") '
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, NOW()) '
+            'ON CONFLICT ("workspaceId", "ownedChannelId", "externalPostId") '
+            'DO UPDATE SET "text" = EXCLUDED."text", "postDate" = EXCLUDED."postDate", "views" = EXCLUDED."views"',
+            (str(uuid.uuid4()), workspace_id, owned_channel_id, external_post_id, text, post_date, views),
+        )
+    conn.commit()
 
 
 def get_workspace_dispatch_block_reason(ctx: dict[str, Any]) -> Optional[str]:
@@ -782,6 +872,129 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
         await client.disconnect()
 
 
+async def process_owned_channel_sync_job(
+    conn: Any, job: dict[str, Any], api_id: int, api_hash: str, enc_key: bytes
+) -> None:
+    workspace_id = str(job["workspaceId"])
+    owned_channel_id = str(job["ownedChannelId"])
+
+    owned_channel = get_owned_channel(conn, owned_channel_id, workspace_id)
+    if not owned_channel:
+        return
+
+    account_source = owned_channel if owned_channel.get("telegramAccountId") else get_any_connected_account_for_workspace(conn, workspace_id)
+    if not account_source:
+        update_owned_channel(
+            conn,
+            owned_channel_id,
+            status="FAILED",
+            syncError="Подключите рабочий Telegram-аккаунт для чтения канала",
+            lastStatsSyncedAt=utc_now(),
+        )
+        return
+
+    if account_source.get("status") != "CONNECTED" and account_source.get("accountStatus") != "CONNECTED":
+        update_owned_channel(
+            conn,
+            owned_channel_id,
+            status="FAILED",
+            syncError="Рабочий Telegram-аккаунт должен быть подключен",
+            lastStatsSyncedAt=utc_now(),
+        )
+        return
+
+    encrypted = account_source.get("sessionEncrypted")
+    if not encrypted:
+        update_owned_channel(conn, owned_channel_id, status="FAILED", syncError="Нет активной сессии аккаунта", lastStatsSyncedAt=utc_now())
+        return
+
+    try:
+        session_string = decrypt_session(str(encrypted), enc_key)
+    except Exception:
+        update_owned_channel(conn, owned_channel_id, status="FAILED", syncError="Не удалось расшифровать сессию аккаунта", lastStatsSyncedAt=utc_now())
+        return
+
+    proxy = build_proxy_config(
+        account_source.get("proxyHost"),
+        account_source.get("proxyPort"),
+        account_source.get("proxyUsername"),
+        account_source.get("proxyPassword"),
+    )
+
+    client = TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
+
+    try:
+        await client.connect()
+        entity = await client.get_entity(owned_channel["username"])
+        messages = await client.get_messages(entity, limit=50)
+
+        views_values: list[int] = []
+        last_post_id: Optional[str] = None
+
+        for msg in messages:
+            msg_id = getattr(msg, "id", None)
+            if msg_id and last_post_id is None:
+                last_post_id = str(msg_id)
+
+            views = getattr(msg, "views", None)
+            if isinstance(views, int):
+                views_values.append(views)
+
+            text = (getattr(msg, "message", None) or "").strip()
+            if not msg_id or not text:
+                continue
+
+            post_date = getattr(msg, "date", None)
+            if post_date and post_date.tzinfo is None:
+                post_date = post_date.replace(tzinfo=timezone.utc)
+
+            upsert_owned_channel_post_sample(
+                conn,
+                workspace_id,
+                owned_channel_id,
+                str(msg_id),
+                text[:12000],
+                post_date,
+                int(views) if isinstance(views, int) else None,
+            )
+
+        participants_count = getattr(entity, "participants_count", None)
+        subscriber_count = int(participants_count) if isinstance(participants_count, int) else None
+        average_views = int(sum(views_values) / len(views_values)) if len(views_values) > 0 else None
+        title = getattr(entity, "title", None)
+
+        update_owned_channel(
+            conn,
+            owned_channel_id,
+            title=title,
+            subscriberCount=subscriber_count,
+            averageViews=average_views,
+            lastPostId=last_post_id,
+            lastStatsSyncedAt=utc_now(),
+            status="ACTIVE",
+            syncError=None,
+        )
+        insert_owned_channel_snapshot(conn, workspace_id, owned_channel_id, subscriber_count, average_views, len(views_values))
+    except Exception as exc:
+        message = str(exc).strip().lower()
+        if "username" in message or "not found" in message:
+            friendly = "Канал не найден. Проверьте username."
+        elif "private" in message or "forbidden" in message or "not participant" in message:
+            friendly = "Нет доступа к каналу с этого рабочего аккаунта."
+        else:
+            friendly = "Не удалось получить статистику канала. Попробуйте позже."
+
+        update_owned_channel(
+            conn,
+            owned_channel_id,
+            status="FAILED",
+            syncError=friendly,
+            lastStatsSyncedAt=utc_now(),
+        )
+    finally:
+        await client.disconnect()
+
+
 def fetch_active_channels(conn: Any) -> list[dict[str, Any]]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -825,7 +1038,9 @@ def main() -> None:
     conn = psycopg2.connect(**parse_database_url(database_url))
 
     print("[telegram-worker] started")
-    print(f"[telegram-worker] consuming queues: {LOGIN_QUEUE_NAME}, {MONITOR_QUEUE_NAME}, {DISPATCH_QUEUE_NAME}")
+    print(
+        f"[telegram-worker] consuming queues: {LOGIN_QUEUE_NAME}, {MONITOR_QUEUE_NAME}, {DISPATCH_QUEUE_NAME}, {OWNED_CHANNEL_SYNC_QUEUE_NAME}"
+    )
 
     last_periodic_run = 0.0
 
@@ -861,6 +1076,13 @@ def main() -> None:
                 payload = parse_dispatch_payload(raw)
                 if payload:
                     asyncio.run(process_dispatch_job(conn, payload, api_id, api_hash, enc_key))
+
+            owned_channel_item = r.blpop(OWNED_CHANNEL_SYNC_QUEUE_NAME, timeout=1)
+            if owned_channel_item:
+                _, raw = owned_channel_item
+                payload = parse_owned_channel_sync_payload(raw)
+                if payload:
+                    asyncio.run(process_owned_channel_sync_job(conn, payload, api_id, api_hash, enc_key))
 
             now_ts = time.time()
             if now_ts - last_periodic_run >= 120:

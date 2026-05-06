@@ -31,6 +31,18 @@ enum MonitoredChannelStatus {
   ARCHIVED
 }
 
+enum OwnedChannelStatus {
+  PENDING
+  ACTIVE
+  FAILED
+}
+
+enum AiProfileStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 enum OpportunityStatus {
   NEW
   REVIEWED
@@ -104,6 +116,10 @@ model Workspace {
   telegramAccounts      TelegramAccount[]
   telegramLoginSessions TelegramLoginSession[]
   monitoredChannels     MonitoredChannel[]
+  ownedChannels         OwnedChannel[]
+  ownedChannelSnapshots OwnedChannelStatsSnapshot[]
+  ownedChannelPostSamples OwnedChannelPostSample[]
+  ownedChannelAiProfiles  OwnedChannelAiProfile[]
   knowledgeBaseItems    KnowledgeBase[]
   opportunities         CommentOpportunity[]
   generatedComments     GeneratedComment[]
@@ -144,6 +160,7 @@ model TelegramAccount {
   workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   loginSessions     TelegramLoginSession[]
   monitoredChannels MonitoredChannel[]
+  ownedChannels     OwnedChannel[]
   opportunities     CommentOpportunity[]
   dispatchJobs      DispatchJob[]
   safetyState       AccountSafetyState?
@@ -184,6 +201,84 @@ model MonitoredChannel {
   opportunities          CommentOpportunity[]
 
   @@unique([workspaceId, username])
+}
+
+model OwnedChannel {
+  id                     String            @id @default(cuid())
+  workspaceId            String
+  telegramAccountId      String?
+  username               String
+  title                  String?
+  status                 OwnedChannelStatus @default(PENDING)
+  subscriberCount        Int?
+  averageViews           Int?
+  lastPostId             String?
+  lastStatsSyncedAt      DateTime?
+  syncError              String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  workspace              Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  telegramAccount        TelegramAccount?  @relation(fields: [telegramAccountId], references: [id], onDelete: SetNull)
+  statsSnapshots         OwnedChannelStatsSnapshot[]
+  postSamples            OwnedChannelPostSample[]
+  aiProfile              OwnedChannelAiProfile?
+
+  @@unique([workspaceId, username])
+  @@index([workspaceId])
+}
+
+model OwnedChannelStatsSnapshot {
+  id               String       @id @default(cuid())
+  workspaceId      String
+  ownedChannelId   String
+  subscriberCount  Int?
+  averageViews     Int?
+  postsSampled     Int?
+  capturedAt       DateTime     @default(now())
+  workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownedChannel     OwnedChannel @relation(fields: [ownedChannelId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, ownedChannelId, capturedAt])
+}
+
+model OwnedChannelPostSample {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  ownedChannelId String
+  externalPostId String
+  text          String
+  postDate      DateTime?
+  views         Int?
+  createdAt     DateTime     @default(now())
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownedChannel  OwnedChannel @relation(fields: [ownedChannelId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, ownedChannelId, externalPostId])
+  @@index([workspaceId, ownedChannelId, postDate])
+}
+
+model OwnedChannelAiProfile {
+  id                          String          @id @default(cuid())
+  workspaceId                 String
+  ownedChannelId              String          @unique
+  status                      AiProfileStatus @default(PENDING)
+  sourcePostCount             Int?
+  lastAnalyzedPostId          String?
+  styleSummary                String?
+  topicSummary                String?
+  positioningSummary          String?
+  recurringIdeas              String?
+  vocabularyNotes             String?
+  offerNotes                  String?
+  avoidNotes                  String?
+  combinedPromptContext       String?
+  generatedAt                 DateTime?
+  updatedAt                   DateTime        @updatedAt
+  createdAt                   DateTime        @default(now())
+  workspace                   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownedChannel                OwnedChannel    @relation(fields: [ownedChannelId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model KnowledgeBase {

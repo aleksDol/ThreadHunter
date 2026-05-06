@@ -12,7 +12,7 @@ const navItems = [
   { href: "/dashboard/comments", label: "Комментарии" },
   { href: "/dashboard/accounts", label: "Аккаунты" },
   { href: "/dashboard/channels", label: "Каналы" },
-  { href: "/dashboard/knowledge", label: "База знаний" },
+  { href: "/dashboard/knowledge", label: "AI Context" },
   { href: "/dashboard/billing", label: "Оплата" }
 ] as const;
 
@@ -21,7 +21,7 @@ const titleMap: Record<string, string> = {
   "/dashboard/comments": "Комментарии",
   "/dashboard/accounts": "Аккаунты",
   "/dashboard/channels": "Каналы",
-  "/dashboard/knowledge": "База знаний",
+  "/dashboard/knowledge": "AI Context",
   "/dashboard/billing": "Оплата и лимиты",
   "/dashboard/settings": "Настройки"
 };

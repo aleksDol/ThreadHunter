@@ -113,6 +113,76 @@ export type KnowledgeBaseItem = {
   updatedAt: string;
 };
 
+export type OwnedChannelStatus = "PENDING" | "ACTIVE" | "FAILED";
+
+export type OwnedChannel = {
+  id: string;
+  workspaceId: string;
+  telegramAccountId: string | null;
+  username: string;
+  title: string | null;
+  status: OwnedChannelStatus;
+  subscriberCount: number | null;
+  averageViews: number | null;
+  lastPostId: string | null;
+  lastStatsSyncedAt: string | null;
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  telegramAccount: {
+    id: string;
+    displayName: string | null;
+    username: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    status: TelegramAccount["status"];
+  } | null;
+};
+
+export type OwnedChannelAiProfile = {
+  id: string;
+  workspaceId: string;
+  ownedChannelId: string;
+  status: "PENDING" | "READY" | "FAILED";
+  sourcePostCount: number | null;
+  lastAnalyzedPostId: string | null;
+  styleSummary: string | null;
+  topicSummary: string | null;
+  positioningSummary: string | null;
+  recurringIdeas: string | null;
+  vocabularyNotes: string | null;
+  offerNotes: string | null;
+  avoidNotes: string | null;
+  combinedPromptContext: string | null;
+  generatedAt: string | null;
+  updatedAt: string;
+  createdAt: string;
+};
+
+export type OwnedChannelContextSummary = {
+  channel: OwnedChannel;
+  aiProfile: OwnedChannelAiProfile | null;
+  latestSnapshot: {
+    id: string;
+    subscriberCount: number | null;
+    averageViews: number | null;
+    postsSampled: number | null;
+    capturedAt: string;
+  } | null;
+  firstSnapshot: {
+    id: string;
+    subscriberCount: number | null;
+    averageViews: number | null;
+    postsSampled: number | null;
+    capturedAt: string;
+  } | null;
+  delta: {
+    subscriberCount: number | null;
+    averageViews: number | null;
+  };
+  postSampleCount: number;
+};
+
 export type DispatchJob = {
   id: string;
   workspaceId: string;
@@ -271,6 +341,11 @@ export type CreateKnowledgeBaseInput = {
   content: string;
 };
 
+export type CreateOwnedChannelInput = {
+  username: string;
+  telegramAccountId?: string;
+};
+
 export type UpdateKnowledgeBaseInput = {
   title?: string;
   content?: string;
@@ -367,6 +442,19 @@ export const listKnowledgeBase = () => apiFetch<KnowledgeBaseItem[]>("/knowledge
 export const createKnowledgeBase = (input: CreateKnowledgeBaseInput) => apiFetch<KnowledgeBaseItem>("/knowledge-base", { method: "POST", body: JSON.stringify(input) });
 export const updateKnowledgeBase = (id: string, input: UpdateKnowledgeBaseInput) => apiFetch<KnowledgeBaseItem>(`/knowledge-base/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteKnowledgeBase = (id: string) => apiFetch<{ ok: true }>(`/knowledge-base/${id}`, { method: "DELETE" });
+
+export const listOwnedChannels = () => apiFetch<OwnedChannel[]>("/owned-channels");
+export const createOwnedChannel = (input: CreateOwnedChannelInput) =>
+  apiFetch<OwnedChannel>("/owned-channels", { method: "POST", body: JSON.stringify(input) });
+export const deleteOwnedChannel = (id: string) => apiFetch<{ ok: true }>(`/owned-channels/${id}`, { method: "DELETE" });
+export const syncOwnedChannelStats = (id: string) =>
+  apiFetch<{ status: "queued" }>(`/owned-channels/${id}/sync-stats`, { method: "POST" });
+export const getOwnedChannelAiProfile = (id: string) =>
+  apiFetch<OwnedChannelAiProfile | null>(`/owned-channels/${id}/ai-profile`);
+export const generateOwnedChannelAiProfile = (id: string) =>
+  apiFetch<{ status: "queued" }>(`/owned-channels/${id}/generate-ai-profile`, { method: "POST" });
+export const getOwnedChannelContextSummary = (id: string) =>
+  apiFetch<OwnedChannelContextSummary>(`/owned-channels/${id}/context-summary`);
 
 export const getBillingStatus = () => apiFetch<BillingStatus>("/billing/status");
 export const devActivateBilling = () => apiFetch<{ ok: true; workspace: { id: string; plan: string; subscriptionStatus: string } }>("/billing/dev-activate", { method: "POST" });

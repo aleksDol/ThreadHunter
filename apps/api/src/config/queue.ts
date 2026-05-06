@@ -12,6 +12,8 @@ export const TELEGRAM_MONITOR_QUEUE_NAME = "telegram-monitor:queue";
 export const AI_ANALYSIS_QUEUE_NAME = "ai-analysis:queue";
 export const COMMENT_GENERATION_QUEUE_NAME = "comment-generation:queue";
 export const TELEGRAM_DISPATCH_QUEUE_NAME = "telegram-dispatch:queue";
+export const OWNED_CHANNEL_SYNC_QUEUE_NAME = "owned-channel-sync:queue";
+export const OWNED_CHANNEL_AI_PROFILE_QUEUE_NAME = "owned-channel-ai-profile:queue";
 
 export type TelegramLoginQueuePayload = {
   type: "telegram_login_start";
@@ -51,6 +53,20 @@ export type TelegramDispatchQueuePayload = {
   createdAt: string;
 };
 
+export type OwnedChannelSyncQueuePayload = {
+  type: "sync_owned_channel_stats";
+  workspaceId: string;
+  ownedChannelId: string;
+  createdAt: string;
+};
+
+export type OwnedChannelAiProfileQueuePayload = {
+  type: "generate_owned_channel_ai_profile";
+  workspaceId: string;
+  ownedChannelId: string;
+  createdAt: string;
+};
+
 export async function pushTelegramLoginJob(payload: TelegramLoginQueuePayload): Promise<void> {
   await redisConnection.rpush(TELEGRAM_LOGIN_QUEUE_NAME, JSON.stringify(payload));
 }
@@ -69,4 +85,12 @@ export async function pushCommentGenerationJob(payload: CommentGenerationQueuePa
 
 export async function pushTelegramDispatchJob(payload: TelegramDispatchQueuePayload): Promise<void> {
   await redisConnection.rpush(TELEGRAM_DISPATCH_QUEUE_NAME, JSON.stringify(payload));
+}
+
+export async function pushOwnedChannelSyncJob(payload: OwnedChannelSyncQueuePayload): Promise<void> {
+  await redisConnection.rpush(OWNED_CHANNEL_SYNC_QUEUE_NAME, JSON.stringify(payload));
+}
+
+export async function pushOwnedChannelAiProfileJob(payload: OwnedChannelAiProfileQueuePayload): Promise<void> {
+  await redisConnection.rpush(OWNED_CHANNEL_AI_PROFILE_QUEUE_NAME, JSON.stringify(payload));
 }

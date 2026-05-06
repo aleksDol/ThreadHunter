@@ -13,6 +13,7 @@ config();
 
 const ANALYSIS_QUEUE_NAME = "ai-analysis:queue";
 const GENERATION_QUEUE_NAME = "comment-generation:queue";
+const OWNED_CHANNEL_AI_PROFILE_QUEUE_NAME = "owned-channel-ai-profile:queue";
 
 const envSchema = z.object({
   REDIS_URL: z.string().default("redis://localhost:6379"),
@@ -23,6 +24,7 @@ const envSchema = z.object({
 const env = envSchema.parse(process.env);
 
 const prisma = new PrismaClient();
+const prismaAny = prisma as any;
 const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const openai = env.OPENAI_API_KEY
   ? new OpenAI({
@@ -45,6 +47,13 @@ const generationPayloadSchema = z.object({
   createdAt: z.string()
 });
 
+const aiProfilePayloadSchema = z.object({
+  type: z.literal("generate_owned_channel_ai_profile"),
+  workspaceId: z.string().cuid(),
+  ownedChannelId: z.string().cuid(),
+  createdAt: z.string()
+});
+
 const aiResultSchema = z.object({
   shouldComment: z.boolean(),
   relevanceScore: z.number().min(0).max(1),
@@ -63,6 +72,16 @@ const generatedCommentSchema = z.object({
   qualityScore: z.number().min(0).max(1)
 });
 
+const ownedChannelProfileSchema = z.object({
+  styleSummary: z.string().min(1).max(1500),
+  topicSummary: z.string().min(1).max(1500),
+  positioningSummary: z.string().min(1).max(1500),
+  recurringIdeas: z.string().min(1).max(2500),
+  vocabularyNotes: z.string().min(1).max(2000),
+  offerNotes: z.string().min(1).max(2000),
+  avoidNotes: z.string().min(1).max(1500)
+});
+
 function safeJsonParse(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -74,6 +93,42 @@ function safeJsonParse(raw: string): unknown {
 function trimContext(text: string, max = 8000): string {
   if (text.length <= max) return text;
   return text.slice(0, max);
+}
+
+async function getOwnedChannelsPromptContext(workspaceId: string): Promise<string> {
+  const profiles = await prismaAny.ownedChannelAiProfile.findMany({
+    where: { workspaceId, status: "READY" },
+    select: { combinedPromptContext: true },
+    orderBy: { updatedAt: "desc" },
+    take: 5
+  });
+
+  const raw = profiles
+    .map((profile: { combinedPromptContext?: string | null }) => (profile.combinedPromptContext || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (!raw) {
+    return "No owned channel AI profile available.";
+  }
+
+  return trimContext(raw, 4000);
+}
+
+function buildCombinedPromptContext(profile: z.infer<typeof ownedChannelProfileSchema>): string {
+  return trimContext(
+    [
+      "Профиль авторского канала:",
+      `Стиль: ${profile.styleSummary}`,
+      `Темы: ${profile.topicSummary}`,
+      `Позиционирование: ${profile.positioningSummary}`,
+      `Повторяющиеся идеи: ${profile.recurringIdeas}`,
+      `Лексика: ${profile.vocabularyNotes}`,
+      `Офферы: ${profile.offerNotes}`,
+      `Чего избегать: ${profile.avoidNotes}`
+    ].join("\n"),
+    4000
+  );
 }
 
 function passesSafety(text: string): { passed: boolean; reason: string } {
@@ -138,6 +193,7 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
       "No knowledge base entries available.",
     8000
   );
+  const ownedChannelContext = await getOwnedChannelsPromptContext(opportunity.workspaceId);
 
   const prompt = [
     "You are an assistant that evaluates whether a Telegram post should receive an expert comment.",
@@ -151,7 +207,8 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
     "Workspace: " + opportunity.workspace.name,
     "Channel: @" + opportunity.monitoredChannel.username,
     "Post:\n" + opportunity.postText,
-    "Knowledge base:\n" + kbContext
+    "Knowledge base:\n" + kbContext,
+    "Owned channel style context:\n" + ownedChannelContext
   ].join("\n\n");
 
   try {
@@ -253,6 +310,7 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
       "No knowledge base entries available.",
     8000
   );
+  const ownedChannelContext = await getOwnedChannelsPromptContext(opportunity.workspaceId);
 
   const prompt = [
     "Сгенерируй экспертный комментарий на русском языке к посту Telegram.",
@@ -269,7 +327,8 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     `Тема поста: ${opportunity.keyTopic ?? "не указана"}`,
     `Экспертный угол: ${opportunity.expertAngle ?? "не указан"}`,
     `Пост:\n${opportunity.postText}`,
-    `KnowledgeBase:\n${kbContext}`
+    `KnowledgeBase:\n${kbContext}`,
+    `Профиль авторского канала:\n${ownedChannelContext}`
   ].join("\n\n");
 
   try {
@@ -350,8 +409,145 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
   }
 }
 
+async function generateOwnedChannelAiProfile(payload: z.infer<typeof aiProfilePayloadSchema>): Promise<void> {
+  const ownedChannel = await prisma.ownedChannel.findFirst({
+    where: { id: payload.ownedChannelId, workspaceId: payload.workspaceId },
+    select: { id: true, workspaceId: true, username: true }
+  });
+
+  if (!ownedChannel) return;
+
+  await prismaAny.ownedChannelAiProfile.upsert({
+    where: { ownedChannelId: ownedChannel.id },
+    update: { status: "PENDING" },
+    create: { workspaceId: payload.workspaceId, ownedChannelId: ownedChannel.id, status: "PENDING" }
+  });
+
+  const samples = await prismaAny.ownedChannelPostSample.findMany({
+    where: { workspaceId: payload.workspaceId, ownedChannelId: ownedChannel.id },
+    orderBy: [{ postDate: "desc" }, { createdAt: "desc" }],
+    take: 50
+  });
+
+  if (samples.length < 3) {
+    await prismaAny.ownedChannelAiProfile.update({
+      where: { ownedChannelId: ownedChannel.id },
+      data: {
+        status: "FAILED",
+        sourcePostCount: samples.length,
+        avoidNotes: "Недостаточно текстовых постов для анализа",
+        generatedAt: new Date()
+      }
+    });
+    return;
+  }
+
+  if (!openai) {
+    await prismaAny.ownedChannelAiProfile.update({
+      where: { ownedChannelId: ownedChannel.id },
+      data: {
+        status: "FAILED",
+        sourcePostCount: samples.length,
+        avoidNotes: "OPENAI_API_KEY is not configured",
+        generatedAt: new Date()
+      }
+    });
+    return;
+  }
+
+  const postsContext = trimContext(
+    samples
+      .map((sample: { views?: number | null; postDate?: Date | null; text: string }, index: number) => {
+        const views = sample.views ?? "-";
+        const date = sample.postDate ? new Date(sample.postDate).toISOString() : "-";
+        return `#${index + 1} [${date}] views=${views}\n${sample.text}`;
+      })
+      .join("\n\n"),
+    12000
+  );
+
+  const prompt = [
+    "Проанализируй посты авторского Telegram-канала и верни только валидный JSON без markdown.",
+    "JSON contract:",
+    "{",
+    '  "styleSummary": "...",',
+    '  "topicSummary": "...",',
+    '  "positioningSummary": "...",',
+    '  "recurringIdeas": "...",',
+    '  "vocabularyNotes": "...",',
+    '  "offerNotes": "...",',
+    '  "avoidNotes": "..."',
+    "}",
+    "Требования:",
+    "- Пиши на русском.",
+    "- Кратко и по делу.",
+    "- Не добавляй выдуманные факты.",
+    `Канал: @${ownedChannel.username}`,
+    `Постов для анализа: ${samples.length}`,
+    `Посты:\n${postsContext}`
+  ].join("\n");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: env.AI_RELEVANCE_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: "Return strict JSON only." },
+        { role: "user", content: prompt }
+      ]
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("Empty AI profile response");
+    }
+
+    const parsed = ownedChannelProfileSchema.safeParse(safeJsonParse(content));
+    if (!parsed.success) {
+      throw new Error("AI profile JSON schema validation failed");
+    }
+
+    const profile = parsed.data;
+    const combinedPromptContext = buildCombinedPromptContext(profile);
+
+    await prismaAny.ownedChannelAiProfile.update({
+      where: { ownedChannelId: ownedChannel.id },
+      data: {
+        status: "READY",
+        sourcePostCount: samples.length,
+        lastAnalyzedPostId: samples[0]?.externalPostId ?? null,
+        styleSummary: profile.styleSummary,
+        topicSummary: profile.topicSummary,
+        positioningSummary: profile.positioningSummary,
+        recurringIdeas: profile.recurringIdeas,
+        vocabularyNotes: profile.vocabularyNotes,
+        offerNotes: profile.offerNotes,
+        avoidNotes: profile.avoidNotes,
+        combinedPromptContext,
+        generatedAt: new Date()
+      }
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "AI profile generation error";
+    await prismaAny.ownedChannelAiProfile.update({
+      where: { ownedChannelId: ownedChannel.id },
+      data: {
+        status: "FAILED",
+        sourcePostCount: samples.length,
+        avoidNotes: reason.slice(0, 2000),
+        generatedAt: new Date()
+      }
+    });
+  }
+}
+
 async function main(): Promise<void> {
-  console.info("[ai-worker] started, queues:", ANALYSIS_QUEUE_NAME, GENERATION_QUEUE_NAME);
+  console.info(
+    "[ai-worker] started, queues:",
+    ANALYSIS_QUEUE_NAME,
+    GENERATION_QUEUE_NAME,
+    OWNED_CHANNEL_AI_PROFILE_QUEUE_NAME
+  );
 
   while (true) {
     try {
@@ -374,6 +570,17 @@ async function main(): Promise<void> {
           await generateComment(parsed.data);
         } else {
           console.warn("[ai-worker] invalid generation payload");
+        }
+      }
+
+      const aiProfileItem = await redis.blpop(OWNED_CHANNEL_AI_PROFILE_QUEUE_NAME, 2);
+      if (aiProfileItem) {
+        const [, raw] = aiProfileItem;
+        const parsed = aiProfilePayloadSchema.safeParse(safeJsonParse(raw));
+        if (parsed.success) {
+          await generateOwnedChannelAiProfile(parsed.data);
+        } else {
+          console.warn("[ai-worker] invalid owned channel ai profile payload");
         }
       }
     } catch (error) {
