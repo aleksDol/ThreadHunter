@@ -94,9 +94,12 @@ export default function AccountsPage() {
     };
   }, [activeLoginSessionId]);
 
-  const empty = items.length === 0;
   const qrVisible = Boolean(activeLoginSessionId);
   const connectLabel = useMemo(() => connectStatusLabel(connectState), [connectState]);
+  const visibleAccounts = useMemo(
+    () => items.filter((item) => !(item.status === "FAILED" && !item.connectedAt)),
+    [items]
+  );
 
   async function onConnectStart() {
     setError(null);
@@ -188,9 +191,9 @@ export default function AccountsPage() {
         </Card>
       ) : null}
 
-      {empty ? null : (
+      {visibleAccounts.length === 0 ? null : (
         <div className="grid gap-4">
-          {items.map((item) => (
+          {visibleAccounts.map((item) => (
             <Card key={item.id} className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>

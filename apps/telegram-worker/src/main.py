@@ -495,8 +495,6 @@ async def process_login_job(
             try:
                 await asyncio.wait_for(qr.wait(), timeout=3)
                 break
-            except TimeoutError:
-                raise
             except asyncio.TimeoutError:
                 if (utc_now() - start).total_seconds() > timeout_seconds:
                     raise TimeoutError("QR login expired")
