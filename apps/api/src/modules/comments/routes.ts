@@ -26,7 +26,7 @@ const filtersSchema = z.object({
 
 const generatedFiltersSchema = z.object({
   status: z.nativeEnum(GeneratedCommentStatus).optional(),
-  opportunityId: z.string().cuid().optional()
+  opportunityId: z.union([z.string().cuid(), z.string().uuid()]).optional()
 });
 
 const generatedPatchSchema = z.object({

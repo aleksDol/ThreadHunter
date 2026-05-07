@@ -36,14 +36,14 @@ const openai = env.OPENAI_API_KEY
 const analysisPayloadSchema = z.object({
   type: z.literal("analyze_comment_opportunity"),
   workspaceId: z.string().cuid(),
-  opportunityId: z.string().cuid(),
+  opportunityId: z.union([z.string().cuid(), z.string().uuid()]),
   createdAt: z.string()
 });
 
 const generationPayloadSchema = z.object({
   type: z.literal("generate_comment"),
   workspaceId: z.string().cuid(),
-  opportunityId: z.string().cuid(),
+  opportunityId: z.union([z.string().cuid(), z.string().uuid()]),
   createdAt: z.string()
 });
 
@@ -59,11 +59,11 @@ const aiResultSchema = z.object({
   commentIntent: z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]),
   relevanceScore: z.number().min(0).max(1),
   riskLevel: z.enum(["low", "medium", "high"]),
-  expertAngle: z.string(),
-  analysisReason: z.string(),
-  commentType: z.string(),
-  keyTopic: z.string(),
-  spamRiskReason: z.string()
+  expertAngle: z.string().optional().default(""),
+  analysisReason: z.string().optional().default(""),
+  commentType: z.string().optional().default(""),
+  keyTopic: z.string().optional().default(""),
+  spamRiskReason: z.string().optional().default("")
 });
 
 const generatedCommentSchema = z.object({
