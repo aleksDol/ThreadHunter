@@ -55,10 +55,22 @@ const aiProfilePayloadSchema = z.object({
 });
 
 const aiResultSchema = z.object({
-  shouldComment: z.boolean(),
-  commentIntent: z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]),
-  relevanceScore: z.number().min(0).max(1),
-  riskLevel: z.enum(["low", "medium", "high"]),
+  shouldComment: z.coerce.boolean().optional().default(false),
+  commentIntent: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]))
+    .optional()
+    .default("skip"),
+  relevanceScore: z.coerce.number().min(0).max(1).optional().default(0),
+  riskLevel: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.enum(["low", "medium", "high"]))
+    .optional()
+    .default("medium"),
   expertAngle: z.string().optional().default(""),
   analysisReason: z.string().optional().default(""),
   commentType: z.string().optional().default(""),
