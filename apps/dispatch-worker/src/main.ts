@@ -8,7 +8,8 @@ config();
 
 const envSchema = z.object({
   REDIS_URL: z.string().default("redis://localhost:6379"),
-  DISPATCH_SCHEDULER_INTERVAL_SEC: z.coerce.number().default(45)
+  DISPATCH_SCHEDULER_INTERVAL_SEC: z.coerce.number().default(45),
+  DISPATCH_READY_STUCK_MINUTES: z.coerce.number().default(2)
 });
 
 const env = envSchema.parse(process.env);
@@ -182,6 +183,22 @@ async function processJob(jobId: string): Promise<void> {
 }
 
 async function tick(): Promise<void> {
+  // Watchdog: if READY jobs stay unsent for too long, re-schedule them.
+  const readyStuckBefore = new Date(Date.now() - env.DISPATCH_READY_STUCK_MINUTES * 60 * 1000);
+  await prisma.dispatchJob.updateMany({
+    where: {
+      status: DispatchStatus.READY,
+      sentAt: null,
+      queuedAt: { not: null, lte: readyStuckBefore }
+    },
+    data: {
+      status: DispatchStatus.SCHEDULED,
+      scheduledAt: new Date(Date.now() + 60 * 1000),
+      queuedAt: null,
+      error: "Auto-retry: READY job stuck without send confirmation"
+    }
+  });
+
   const now = new Date();
   const jobs = await prisma.dispatchJob.findMany({
     where: {
