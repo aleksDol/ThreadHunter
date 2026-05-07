@@ -414,7 +414,7 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
       finalIntent === "neutral_opinion" &&
       neutralEnabled &&
       result.riskLevel === "low" &&
-      result.relevanceScore >= 0.55;
+      result.relevanceScore >= 0.4;
     const canAutoQuestion =
       finalIntent === "clarifying_question" &&
       neutralEnabled &&

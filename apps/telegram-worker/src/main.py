@@ -1170,6 +1170,10 @@ def main() -> None:
                 last_periodic_run = now_ts
 
         except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             print(f"[telegram-worker] loop error: {exc}")
 
 
