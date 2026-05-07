@@ -144,6 +144,10 @@ function trimContext(text: string, max = 8000): string {
   return text.slice(0, max);
 }
 
+function countQuestions(text: string): number {
+  return (text.match(/\?/g) || []).length;
+}
+
 async function getOwnedChannelsPromptContext(workspaceId: string): Promise<string> {
   const profiles = await prismaAny.ownedChannelAiProfile.findMany({
     where: { workspaceId, status: "READY" },
@@ -273,6 +277,38 @@ async function rewriteToCompactComment(
     "- вернуть только текст комментария, без JSON и без пояснений",
     "",
     "Комментарий:",
+    originalText
+  ].join("\n");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: env.AI_RELEVANCE_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: "Return plain text only." },
+        { role: "user", content: rewritePrompt }
+      ]
+    });
+
+    const rewritten = (response.choices[0]?.message?.content || "").trim();
+    return rewritten || originalText;
+  } catch {
+    return originalText;
+  }
+}
+
+async function rewriteToSingleQuestion(originalText: string): Promise<string> {
+  if (!openai) return originalText;
+
+  const rewritePrompt = [
+    "Перепиши текст в один короткий, естественный и уместный вопрос по теме поста.",
+    "Требования:",
+    "- только один вопрос",
+    "- без продажи и ссылок",
+    "- без пролога и пояснений",
+    "- вернуть только итоговый вопрос, заканчивающийся знаком ?",
+    "",
+    "Исходный текст:",
     originalText
   ].join("\n");
 
@@ -507,7 +543,8 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     "Intent rules:",
     "- expert_comment: практический экспертный комментарий с конкретикой.",
     "- neutral_opinion: короткое осмысленное нейтральное сообщение по теме; если уместно, короткое поздравление.",
-    "- clarifying_question: один естественный короткий уточняющий вопрос по теме, без bait.",
+    "- clarifying_question: только один естественный короткий уточняющий вопрос по теме, без bait.",
+    "- clarifying_question MUST contain exactly one question mark in the final text.",
     `Тема поста: ${opportunity.keyTopic ?? "не указана"}`,
     `Экспертный угол: ${opportunity.expertAngle ?? "не указан"}`,
     `Пост:\n${opportunity.postText}`,
@@ -573,6 +610,9 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
       (intent === "clarifying_question" && normalizedText.length > 220)
     ) {
       normalizedText = await rewriteToCompactComment(normalizedText, intent);
+    }
+    if (intent === "clarifying_question" && countQuestions(normalizedText) !== 1) {
+      normalizedText = await rewriteToSingleQuestion(normalizedText);
     }
     const safety = passesSafety(normalizedText, intent);
     const normalizedQualityScore =
