@@ -148,6 +148,16 @@ function countQuestions(text: string): number {
   return (text.match(/\?/g) || []).length;
 }
 
+function getIntentLengthLimits(intent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip"): {
+  min: number;
+  max: number;
+} {
+  if (intent === "expert_comment") return { min: 220, max: 500 };
+  if (intent === "neutral_opinion") return { min: 120, max: 320 };
+  if (intent === "clarifying_question") return { min: 80, max: 220 };
+  return { min: 120, max: 320 };
+}
+
 async function getOwnedChannelsPromptContext(workspaceId: string): Promise<string> {
   const profiles = await prismaAny.ownedChannelAiProfile.findMany({
     where: { workspaceId, status: "READY" },
@@ -290,6 +300,46 @@ async function rewriteToCompactComment(
       ]
     });
 
+    const rewritten = (response.choices[0]?.message?.content || "").trim();
+    return rewritten || originalText;
+  } catch {
+    return originalText;
+  }
+}
+
+async function rewriteToIntentLimits(
+  originalText: string,
+  intent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip"
+): Promise<string> {
+  if (!openai) return originalText;
+
+  const { min, max } = getIntentLengthLimits(intent);
+  const extraRule =
+    intent === "clarifying_question"
+      ? "Это должен быть только один естественный вопрос и только один знак вопроса."
+      : "Сохрани естественный тон по теме поста.";
+
+  const rewritePrompt = [
+    `Перепиши текст строго в диапазон ${min}-${max} символов.`,
+    "Требования:",
+    "- без ссылок и продаж",
+    "- без CTA в личку",
+    extraRule,
+    "- вернуть только итоговый текст без JSON и пояснений",
+    "",
+    "Исходный текст:",
+    originalText
+  ].join("\n");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: env.AI_RELEVANCE_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: "Return plain text only." },
+        { role: "user", content: rewritePrompt }
+      ]
+    });
     const rewritten = (response.choices[0]?.message?.content || "").trim();
     return rewritten || originalText;
   } catch {
@@ -604,12 +654,15 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
       (opportunity.commentIntent as "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip" | null) ??
       "expert_comment";
     let normalizedText = generated.text.trim();
-    if (
-      (intent === "expert_comment" && normalizedText.length > 500) ||
-      (intent === "neutral_opinion" && normalizedText.length > 320) ||
-      (intent === "clarifying_question" && normalizedText.length > 220)
-    ) {
+    const limits = getIntentLengthLimits(intent);
+    if (normalizedText.length > limits.max) {
       normalizedText = await rewriteToCompactComment(normalizedText, intent);
+    }
+    if (intent === "clarifying_question" && countQuestions(normalizedText) !== 1) {
+      normalizedText = await rewriteToSingleQuestion(normalizedText);
+    }
+    if (normalizedText.length < limits.min || normalizedText.length > limits.max) {
+      normalizedText = await rewriteToIntentLimits(normalizedText, intent);
     }
     if (intent === "clarifying_question" && countQuestions(normalizedText) !== 1) {
       normalizedText = await rewriteToSingleQuestion(normalizedText);
