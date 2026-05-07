@@ -171,7 +171,7 @@ function buildCombinedPromptContext(profile: z.infer<typeof ownedChannelProfileS
 function passesSafety(text: string): { passed: boolean; reason: string } {
   const lower = text.toLowerCase();
   if (text.length < 300) return { passed: false, reason: "Text is too short (<300 chars)" };
-  if (text.length > 700) return { passed: false, reason: "Text is too long (>700 chars)" };
+  if (text.length > 500) return { passed: false, reason: "Text is too long (>500 chars)" };
   if (/https?:\/\//i.test(text) || /t\.me\//i.test(text)) return { passed: false, reason: "Contains link" };
   if (/(пишите в личк|напишите мне|свяжитесь со мной|мой курс|мой продукт|пишите в лс|пишите в директ)/i.test(lower)) {
     return { passed: false, reason: "Contains direct sales/contact CTA" };
@@ -210,7 +210,7 @@ async function rewriteToCompactComment(originalText: string): Promise<string> {
   if (!openai) return originalText;
 
   const rewritePrompt = [
-    "Сократи комментарий до 400-500 символов.",
+    "Сократи комментарий до 380-500 символов.",
     "Требования:",
     "- сохранить основной смысл",
     "- русский язык",
@@ -486,7 +486,7 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
 
     const generated = parsed.data;
     let normalizedText = generated.text.trim();
-    if (normalizedText.length > 700) {
+    if (normalizedText.length > 500) {
       normalizedText = await rewriteToCompactComment(normalizedText);
     }
     const safety = passesSafety(normalizedText);
