@@ -808,20 +808,31 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
     )
 
     client = TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
+    # Guard against hanging network calls so READY jobs never get stuck forever.
+    connect_timeout_sec = 25
+    fetch_timeout_sec = 25
+    send_timeout_sec = 35
 
     try:
-        await client.connect()
-        entity = await client.get_entity(ctx["channelUsername"])
+        print(f"[telegram-worker] dispatch start: {dispatch_job_id}")
+        await asyncio.wait_for(client.connect(), timeout=connect_timeout_sec)
+        entity = await asyncio.wait_for(client.get_entity(ctx["channelUsername"]), timeout=fetch_timeout_sec)
         post_id = int(str(ctx["externalPostId"]))
-        original_message = await client.get_messages(entity, ids=post_id)
+        original_message = await asyncio.wait_for(client.get_messages(entity, ids=post_id), timeout=fetch_timeout_sec)
         if not original_message:
             mark_dispatch_failed(conn, dispatch_job_id, "Original post not found")
             return
 
         try:
-            await client.send_message(entity, ctx["commentText"], comment_to=post_id)
+            await asyncio.wait_for(
+                client.send_message(entity, ctx["commentText"], comment_to=post_id),
+                timeout=send_timeout_sec,
+            )
         except TypeError:
-            await client.send_message(entity, ctx["commentText"], reply_to=post_id)
+            await asyncio.wait_for(
+                client.send_message(entity, ctx["commentText"], reply_to=post_id),
+                timeout=send_timeout_sec,
+            )
         except Exception as exc:
             lower = str(exc).lower()
             if "discussion" in lower or "comment" in lower or "reply" in lower:
@@ -849,6 +860,9 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
             )
         conn.commit()
         print(f"[telegram-worker] dispatch sent: {dispatch_job_id}")
+    except TimeoutError:
+        mark_dispatch_failed(conn, dispatch_job_id, "Dispatch timeout while contacting Telegram")
+        print(f"[telegram-worker] dispatch timeout: {dispatch_job_id}")
     except FloodWaitError as exc:
         flood_until = utc_now() + timedelta(seconds=int(exc.seconds))
         with conn.cursor() as cur:
