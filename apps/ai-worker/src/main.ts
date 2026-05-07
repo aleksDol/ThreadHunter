@@ -99,7 +99,29 @@ function safeJsonParse(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch {
-    return null;
+    // Handle common LLM wrappers like ```json ... ``` or extra prose around JSON.
+    const cleaned = raw
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      const first = cleaned.indexOf("{");
+      const last = cleaned.lastIndexOf("}");
+      if (first !== -1 && last !== -1 && last > first) {
+        const slice = cleaned.slice(first, last + 1);
+        try {
+          return JSON.parse(slice);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
   }
 }
 
