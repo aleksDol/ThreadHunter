@@ -73,7 +73,7 @@ const aiResultSchema = z.object({
     .pipe(z.enum(["low", "medium", "high"]))
     .optional()
     .default("medium"),
-  expertAngle: z.string().optional().default(""),
+  expertAngle: z.union([z.string(), z.boolean()]).transform((v) => (typeof v === "string" ? v : "")).optional().default(""),
   analysisReason: z.string().optional().default(""),
   commentType: z.string().optional().default(""),
   keyTopic: z.string().optional().default(""),
@@ -180,10 +180,26 @@ function buildCombinedPromptContext(profile: z.infer<typeof ownedChannelProfileS
   );
 }
 
-function passesSafety(text: string): { passed: boolean; reason: string } {
+function passesSafety(
+  text: string,
+  intent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip"
+): { passed: boolean; reason: string } {
   const lower = text.toLowerCase();
-  if (text.length < 300) return { passed: false, reason: "Text is too short (<300 chars)" };
-  if (text.length > 500) return { passed: false, reason: "Text is too long (>500 chars)" };
+  const minByIntent = {
+    expert_comment: 220,
+    neutral_opinion: 120,
+    clarifying_question: 80,
+    skip: 120
+  } as const;
+  const maxByIntent = {
+    expert_comment: 500,
+    neutral_opinion: 320,
+    clarifying_question: 220,
+    skip: 320
+  } as const;
+
+  if (text.length < minByIntent[intent]) return { passed: false, reason: `Text is too short (<${minByIntent[intent]} chars)` };
+  if (text.length > maxByIntent[intent]) return { passed: false, reason: `Text is too long (>${maxByIntent[intent]} chars)` };
   if (/https?:\/\//i.test(text) || /t\.me\//i.test(text)) return { passed: false, reason: "Contains link" };
   if (/(пишите в личк|напишите мне|свяжитесь со мной|мой курс|мой продукт|пишите в лс|пишите в директ)/i.test(lower)) {
     return { passed: false, reason: "Contains direct sales/contact CTA" };
@@ -234,11 +250,21 @@ function canWorkspaceDispatch(workspace: {
   return sent < limit;
 }
 
-async function rewriteToCompactComment(originalText: string): Promise<string> {
+async function rewriteToCompactComment(
+  originalText: string,
+  intent: "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip"
+): Promise<string> {
   if (!openai) return originalText;
 
+  const rangeByIntent = {
+    expert_comment: "220-500",
+    neutral_opinion: "120-320",
+    clarifying_question: "80-220",
+    skip: "120-320"
+  } as const;
+
   const rewritePrompt = [
-    "Сократи комментарий до 380-500 символов.",
+    `Сократи комментарий до ${rangeByIntent[intent]} символов.`,
     "Требования:",
     "- сохранить основной смысл",
     "- русский язык",
@@ -308,9 +334,13 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
     "- riskLevel high when likely to look like spam.",
     "- relevanceScore must be between 0 and 1.",
     `neutralCommentsEnabled: ${opportunity.workspace.neutralCommentsEnabled ? "true" : "false"}`,
+    "- IMPORTANT intent flow when neutralCommentsEnabled=true:",
+    "  1) clarifying_question: when post invites discussion, has ambiguity, or benefits from one short useful question.",
+    "  2) neutral_opinion: when post is achievement/news/personal update and best reaction is short supportive neutral comment.",
+    "  3) expert_comment: only when practical business value-add is clearly needed.",
     "- expert_comment: strong practical expert angle.",
-    "- neutral_opinion: relevant short meaningful opinion without sales.",
-    "- clarifying_question: one natural question that continues discussion.",
+    "- neutral_opinion: short meaningful neutral/supportive reaction (including concise congratulations when relevant).",
+    "- clarifying_question: exactly one short natural question that continues discussion.",
     "- skip: if forced, risky, irrelevant, or low-value.",
     "- If neutralCommentsEnabled=false, neutral_opinion and clarifying_question must become skip.",
     "Workspace: " + opportunity.workspace.name,
@@ -462,7 +492,10 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
   const prompt = [
     "Сгенерируй комментарий на русском языке к посту Telegram.",
     "Требования:",
-    "- 350-600 символов",
+    "- длина зависит от intent:",
+    "  - expert_comment: 220-500 символов",
+    "  - neutral_opinion: 120-320 символов",
+    "  - clarifying_question: 80-220 символов",
     "- без прямой продажи",
     "- без ссылок",
     "- без призывов написать в личку",
@@ -473,8 +506,8 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     `Intent: ${opportunity.commentIntent ?? "expert_comment"}`,
     "Intent rules:",
     "- expert_comment: практический экспертный комментарий с конкретикой.",
-    "- neutral_opinion: короткое осмысленное мнение по теме без воды и продаж.",
-    "- clarifying_question: один естественный уточняющий вопрос по теме, без bait.",
+    "- neutral_opinion: короткое осмысленное нейтральное сообщение по теме; если уместно, короткое поздравление.",
+    "- clarifying_question: один естественный короткий уточняющий вопрос по теме, без bait.",
     `Тема поста: ${opportunity.keyTopic ?? "не указана"}`,
     `Экспертный угол: ${opportunity.expertAngle ?? "не указан"}`,
     `Пост:\n${opportunity.postText}`,
@@ -530,11 +563,18 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
     }
 
     const generated = parsed.data;
+    const intent =
+      (opportunity.commentIntent as "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip" | null) ??
+      "expert_comment";
     let normalizedText = generated.text.trim();
-    if (normalizedText.length > 500) {
-      normalizedText = await rewriteToCompactComment(normalizedText);
+    if (
+      (intent === "expert_comment" && normalizedText.length > 500) ||
+      (intent === "neutral_opinion" && normalizedText.length > 320) ||
+      (intent === "clarifying_question" && normalizedText.length > 220)
+    ) {
+      normalizedText = await rewriteToCompactComment(normalizedText, intent);
     }
-    const safety = passesSafety(normalizedText);
+    const safety = passesSafety(normalizedText, intent);
     const normalizedQualityScore =
       Number(generated.qualityScore) > 1 ? Number(generated.qualityScore) / 10 : Number(generated.qualityScore);
 
