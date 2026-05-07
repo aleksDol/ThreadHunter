@@ -347,6 +347,9 @@ model DispatchJob {
   telegramAccountId  String
   scheduledAt        DateTime
   queuedAt           DateTime?
+  processingStartedAt DateTime?
+  processingError    String?
+  attemptCount       Int              @default(0)
   sentAt             DateTime?
   status             DispatchStatus
   error              String?

@@ -79,9 +79,46 @@ export default function CommentsPage() {
 
   const autoEnabled = useMemo(() => channels.some((c) => c.status === "ACTIVE"), [channels]);
 
+  const latestPerOpportunity = useMemo(() => {
+    const priority = (item: GeneratedCommentFeedItem): number => {
+      const status = unifiedStatus(item);
+      if (status === "SENT") return 6;
+      if (status === "QUEUED") return 5;
+      if (status === "DRAFT") return 4;
+      if (item.status === "APPROVED") return 3;
+      if (status === "FAILED") return 2;
+      return 1;
+    };
+
+    const bestByOpportunity = new Map<string, GeneratedCommentFeedItem>();
+    for (const item of items) {
+      const existing = bestByOpportunity.get(item.opportunityId);
+      if (!existing) {
+        bestByOpportunity.set(item.opportunityId, item);
+        continue;
+      }
+
+      const existingPriority = priority(existing);
+      const candidatePriority = priority(item);
+      if (candidatePriority > existingPriority) {
+        bestByOpportunity.set(item.opportunityId, item);
+        continue;
+      }
+      if (candidatePriority === existingPriority) {
+        if (new Date(item.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
+          bestByOpportunity.set(item.opportunityId, item);
+        }
+      }
+    }
+
+    return Array.from(bestByOpportunity.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [items]);
+
   const sentToday = useMemo(() => {
     const now = new Date();
-    return items.filter((item) => {
+    return latestPerOpportunity.filter((item) => {
       const sentAt = item.dispatchJob?.sentAt;
       if (!sentAt) return false;
       const d = new Date(sentAt);
@@ -91,24 +128,24 @@ export default function CommentsPage() {
         d.getDate() === now.getDate()
       );
     }).length;
-  }, [items]);
+  }, [latestPerOpportunity]);
 
   const intentStats = useMemo(() => {
     let expert = 0;
     let neutral = 0;
     let question = 0;
-    for (const item of items) {
+    for (const item of latestPerOpportunity) {
       if (item.commentIntent === "neutral_opinion") neutral += 1;
       else if (item.commentIntent === "clarifying_question") question += 1;
       else expert += 1;
     }
     return { expert, neutral, question };
-  }, [items]);
+  }, [latestPerOpportunity]);
 
   const filteredItems = useMemo(() => {
-    if (filter === "all") return items;
-    return items.filter((item) => unifiedStatus(item).toLowerCase() === filter);
-  }, [items, filter]);
+    if (filter === "all") return latestPerOpportunity;
+    return latestPerOpportunity.filter((item) => unifiedStatus(item).toLowerCase() === filter);
+  }, [latestPerOpportunity, filter]);
 
   async function toggleAuto(enable: boolean) {
     setError(null);

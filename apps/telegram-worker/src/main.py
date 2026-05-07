@@ -3,7 +3,6 @@ import base64
 import json
 import os
 import time
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -322,9 +321,9 @@ def insert_owned_channel_snapshot(
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            'INSERT INTO "OwnedChannelStatsSnapshot" ("id", "workspaceId", "ownedChannelId", "subscriberCount", "averageViews", "postsSampled", "capturedAt") '
-            'VALUES (%s, %s, %s, %s, %s, %s, NOW())',
-            (str(uuid.uuid4()), workspace_id, owned_channel_id, subscriber_count, average_views, posts_sampled),
+            'INSERT INTO "OwnedChannelStatsSnapshot" ("workspaceId", "ownedChannelId", "subscriberCount", "averageViews", "postsSampled", "capturedAt") '
+            'VALUES (%s, %s, %s, %s, %s, NOW())',
+            (workspace_id, owned_channel_id, subscriber_count, average_views, posts_sampled),
         )
     conn.commit()
 
@@ -340,11 +339,11 @@ def upsert_owned_channel_post_sample(
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            'INSERT INTO "OwnedChannelPostSample" ("id", "workspaceId", "ownedChannelId", "externalPostId", "text", "postDate", "views", "createdAt") '
-            'VALUES (%s, %s, %s, %s, %s, %s, %s, NOW()) '
+            'INSERT INTO "OwnedChannelPostSample" ("workspaceId", "ownedChannelId", "externalPostId", "text", "postDate", "views", "createdAt") '
+            'VALUES (%s, %s, %s, %s, %s, %s, NOW()) '
             'ON CONFLICT ("workspaceId", "ownedChannelId", "externalPostId") '
             'DO UPDATE SET "text" = EXCLUDED."text", "postDate" = EXCLUDED."postDate", "views" = EXCLUDED."views"',
-            (str(uuid.uuid4()), workspace_id, owned_channel_id, external_post_id, text, post_date, views),
+            (workspace_id, owned_channel_id, external_post_id, text, post_date, views),
         )
     conn.commit()
 
@@ -374,11 +373,11 @@ def ensure_safety_state(conn: Any, telegram_account_id: str) -> dict[str, Any]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             'INSERT INTO "AccountSafetyState" '
-            '("id", "telegramAccountId", "dailyCommentCount", "dailyLimit", "minDelayMinutes", '
+            '("telegramAccountId", "dailyCommentCount", "dailyLimit", "minDelayMinutes", '
             '"activeFromHour", "activeToHour", "timezone", "createdAt", "updatedAt") '
-            'VALUES (%s, %s, 0, 10, 20, 9, 21, %s, NOW(), NOW()) '
+            'VALUES (%s, 0, 10, 20, 9, 21, %s, NOW(), NOW()) '
             'ON CONFLICT ("telegramAccountId") DO NOTHING',
-            (str(uuid.uuid4()), telegram_account_id, "Europe/Amsterdam"),
+            (telegram_account_id, "Europe/Amsterdam"),
         )
     conn.commit()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -390,8 +389,10 @@ def ensure_safety_state(conn: Any, telegram_account_id: str) -> dict[str, Any]:
 def mark_dispatch_failed(conn: Any, dispatch_job_id: str, message: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            'UPDATE "DispatchJob" SET "status" = %s, "error" = %s, "updatedAt" = NOW() WHERE "id" = %s',
-            ("FAILED", message[:1000], dispatch_job_id),
+            'UPDATE "DispatchJob" '
+            'SET "status" = %s, "error" = %s, "processingError" = %s, "processingStartedAt" = NULL, "updatedAt" = NOW() '
+            'WHERE "id" = %s',
+            ("FAILED", message[:1000], message[:1000], dispatch_job_id),
         )
     conn.commit()
 
@@ -399,9 +400,10 @@ def mark_dispatch_failed(conn: Any, dispatch_job_id: str, message: str) -> None:
 def schedule_dispatch_again(conn: Any, dispatch_job_id: str, when_dt: datetime, reason: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            'UPDATE "DispatchJob" SET "status" = %s, "scheduledAt" = %s, "queuedAt" = NULL, "error" = %s, "updatedAt" = NOW() '
+            'UPDATE "DispatchJob" SET "status" = %s, "scheduledAt" = %s, "queuedAt" = NULL, '
+            '"processingStartedAt" = NULL, "processingError" = %s, "error" = %s, "updatedAt" = NOW() '
             'WHERE "id" = %s',
-            ("SCHEDULED", when_dt, reason[:1000], dispatch_job_id),
+            ("SCHEDULED", when_dt, reason[:1000], reason[:1000], dispatch_job_id),
         )
     conn.commit()
 
@@ -499,19 +501,19 @@ def insert_opportunity(
     post_text: str,
     post_date: datetime,
 )-> Optional[str]:
-    opportunity_id = str(uuid.uuid4())
     with conn.cursor() as cur:
         cur.execute(
             'INSERT INTO "CommentOpportunity" '
-            '("id", "workspaceId", "monitoredChannelId", "telegramAccountId", "externalPostId", '
+            '("workspaceId", "monitoredChannelId", "telegramAccountId", "externalPostId", '
             '"postText", "postDate", "status", "createdAt", "updatedAt") '
-            'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()) '
-            'ON CONFLICT ("workspaceId", "monitoredChannelId", "externalPostId") DO NOTHING',
-            (opportunity_id, workspace_id, channel_id, account_id, external_post_id, post_text, post_date, "NEW"),
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW()) '
+            'ON CONFLICT ("workspaceId", "monitoredChannelId", "externalPostId") DO NOTHING '
+            'RETURNING "id"',
+            (workspace_id, channel_id, account_id, external_post_id, post_text, post_date, "NEW"),
         )
-        inserted = cur.rowcount > 0
+        row = cur.fetchone()
     conn.commit()
-    return opportunity_id if inserted else None
+    return str(row[0]) if row else None
 
 
 async def process_login_job(
@@ -749,11 +751,29 @@ async def process_monitor_job(
 async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_hash: str, enc_key: bytes) -> None:
     dispatch_job_id = str(job["dispatchJobId"])
     workspace_id = str(job["workspaceId"])
+    telegram_account_id = str(job.get("telegramAccountId") or "")
+
+    def log_step(step: str, error: Optional[Exception] = None, generated_comment_id: Optional[str] = None) -> None:
+        payload = {
+            "step": step,
+            "dispatchJobId": dispatch_job_id,
+            "workspaceId": workspace_id,
+            "telegramAccountId": telegram_account_id,
+            "generatedCommentId": generated_comment_id,
+        }
+        if error is not None:
+            payload["errorClass"] = error.__class__.__name__
+            payload["errorMessage"] = str(error)[:300]
+        print(f"[telegram-worker] {json.dumps(payload, ensure_ascii=False)}")
+
+    log_step("dispatch_job_received")
 
     ctx = get_dispatch_context(conn, dispatch_job_id)
     if not ctx:
         print(f"[telegram-worker] dispatch job not found: {dispatch_job_id}")
         return
+    generated_comment_id = str(ctx.get("generatedCommentId") or "")
+    log_step("dispatch_job_loaded", generated_comment_id=generated_comment_id)
 
     if str(ctx["workspaceId"]) != workspace_id:
         mark_dispatch_failed(conn, dispatch_job_id, "Workspace mismatch in dispatch payload")
@@ -774,6 +794,23 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
         print(f"[telegram-worker] skip dispatch {dispatch_job_id}: status {ctx['status']}")
         return
 
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT "processingStartedAt" FROM "DispatchJob" WHERE "id" = %s',
+            (dispatch_job_id,),
+        )
+        row = cur.fetchone()
+        processing_started_at = as_utc(row[0]) if row else None
+        if processing_started_at and utc_now() - processing_started_at < timedelta(minutes=10):
+            log_step("dispatch_job_locked", generated_comment_id=generated_comment_id)
+            return
+        cur.execute(
+            'UPDATE "DispatchJob" SET "processingStartedAt" = NOW(), "processingError" = NULL, '
+            '"attemptCount" = COALESCE("attemptCount", 0) + 1, "updatedAt" = NOW() WHERE "id" = %s',
+            (dispatch_job_id,),
+        )
+    conn.commit()
+
     if ctx.get("accountStatus") != "CONNECTED":
         mark_dispatch_failed(conn, dispatch_job_id, "Telegram account is not CONNECTED")
         return
@@ -790,8 +827,10 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
     safety = ensure_safety_state(conn, str(ctx["telegramAccountId"]))
     safety = apply_day_reset_if_needed(conn, safety)
     ready_now, next_time, reason = evaluate_send_safety(safety)
+    log_step("dispatch_safety_checked", generated_comment_id=generated_comment_id)
     if not ready_now:
         schedule_dispatch_again(conn, dispatch_job_id, next_time, reason)
+        log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
         return
 
     try:
@@ -815,16 +854,19 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
     send_timeout_sec = 35
 
     try:
-        print(f"[telegram-worker] dispatch start: {dispatch_job_id}")
+        log_step("dispatch_telegram_client_connected", generated_comment_id=generated_comment_id)
         await asyncio.wait_for(client.connect(), timeout=connect_timeout_sec)
+        log_step("dispatch_channel_resolved", generated_comment_id=generated_comment_id)
         entity = await asyncio.wait_for(client.get_entity(ctx["channelUsername"]), timeout=fetch_timeout_sec)
         post_id = int(str(ctx["externalPostId"]))
+        log_step("dispatch_post_resolved", generated_comment_id=generated_comment_id)
         original_message = await asyncio.wait_for(client.get_messages(entity, ids=post_id), timeout=fetch_timeout_sec)
         if not original_message:
             mark_dispatch_failed(conn, dispatch_job_id, "Original post not found")
             return
 
         try:
+            log_step("dispatch_send_attempt", generated_comment_id=generated_comment_id)
             await asyncio.wait_for(
                 client.send_message(entity, ctx["commentText"], comment_to=post_id),
                 timeout=send_timeout_sec,
@@ -838,6 +880,8 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
             lower = str(exc).lower()
             if "discussion" in lower or "comment" in lower or "reply" in lower:
                 mark_dispatch_failed(conn, dispatch_job_id, "Comments unavailable for this post")
+                log_step("dispatch_send_failed", exc, generated_comment_id=generated_comment_id)
+                log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
                 return
             raise
 
@@ -860,10 +904,18 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
                 (ctx["workspaceId"],),
             )
         conn.commit()
-        print(f"[telegram-worker] dispatch sent: {dispatch_job_id}")
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE "DispatchJob" SET "processingStartedAt" = NULL, "processingError" = NULL, "updatedAt" = NOW() WHERE "id" = %s',
+                (dispatch_job_id,),
+            )
+        conn.commit()
+        log_step("dispatch_send_success", generated_comment_id=generated_comment_id)
+        log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
     except TimeoutError:
         mark_dispatch_failed(conn, dispatch_job_id, "Dispatch timeout while contacting Telegram")
-        print(f"[telegram-worker] dispatch timeout: {dispatch_job_id}")
+        log_step("dispatch_send_failed", TimeoutError("Dispatch timeout while contacting Telegram"), generated_comment_id=generated_comment_id)
+        log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
     except FloodWaitError as exc:
         flood_until = utc_now() + timedelta(seconds=int(exc.seconds))
         with conn.cursor() as cur:
@@ -873,6 +925,8 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
             )
         conn.commit()
         schedule_dispatch_again(conn, dispatch_job_id, flood_until, f"Flood wait: retry after {exc.seconds} seconds")
+        log_step("dispatch_send_failed", exc, generated_comment_id=generated_comment_id)
+        log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
     except Exception as exc:
         message = str(exc)
         lower = message.lower()
@@ -883,6 +937,8 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
             mark_dispatch_failed(conn, dispatch_job_id, "No access to channel")
         else:
             mark_dispatch_failed(conn, dispatch_job_id, message[:1000])
+        log_step("dispatch_send_failed", exc, generated_comment_id=generated_comment_id)
+        log_step("dispatch_db_updated", generated_comment_id=generated_comment_id)
     finally:
         await client.disconnect()
 

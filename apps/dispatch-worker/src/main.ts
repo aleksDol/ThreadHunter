@@ -139,6 +139,13 @@ async function processJob(jobId: string): Promise<void> {
         .plus({ minutes: state.minDelayMinutes }) <= nowTz);
 
   if (readyNow) {
+    const freshProcessing =
+      job.processingStartedAt &&
+      new Date(job.processingStartedAt).getTime() > Date.now() - env.DISPATCH_READY_STUCK_MINUTES * 60 * 1000;
+    if (freshProcessing) {
+      return;
+    }
+
     if (!job.queuedAt) {
       const payload = {
         type: "send_comment" as const,
@@ -171,6 +178,7 @@ async function processJob(jobId: string): Promise<void> {
         where: { id: job.id },
         data: {
           status: DispatchStatus.READY,
+          queuedAt: job.queuedAt ?? new Date(),
           error: null
         }
       });
@@ -194,12 +202,18 @@ async function tick(): Promise<void> {
     where: {
       status: DispatchStatus.READY,
       sentAt: null,
-      OR: [{ queuedAt: { not: null, lte: readyStuckBefore } }, { queuedAt: null }]
+      OR: [
+        { queuedAt: { not: null, lte: readyStuckBefore } },
+        { queuedAt: null },
+        { processingStartedAt: { not: null, lte: readyStuckBefore } }
+      ]
     },
     data: {
       status: DispatchStatus.SCHEDULED,
       scheduledAt: new Date(Date.now() + 60 * 1000),
       queuedAt: null,
+      processingStartedAt: null,
+      processingError: "Auto-retry: READY job stuck without send confirmation",
       error: "Auto-retry: READY job stuck without send confirmation"
     }
   });

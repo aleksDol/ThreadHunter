@@ -80,6 +80,18 @@ const aiResultSchema = z.object({
   spamRiskReason: z.string().optional().default("")
 });
 
+const tolerantAiDefaults = {
+  shouldComment: false,
+  commentIntent: "skip" as const,
+  relevanceScore: 0,
+  riskLevel: "high" as const,
+  expertAngle: "",
+  analysisReason: "",
+  commentType: "",
+  keyTopic: "",
+  spamRiskReason: ""
+};
+
 const generatedCommentSchema = z.object({
   text: z.string().trim().min(1).max(1200),
   variant: z.string().optional().default("default"),
@@ -324,23 +336,30 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
       return;
     }
 
-    const parsed = aiResultSchema.safeParse(safeJsonParse(content));
-    if (!parsed.success) {
-      await markAnalysisFailed(opportunity.id, "AI response schema validation failed");
-      return;
-    }
-
-    const result = parsed.data;
+    const parsedRaw = safeJsonParse(content);
+    const parsed = aiResultSchema.safeParse(parsedRaw);
+    const result = parsed.success
+      ? parsed.data
+      : {
+          ...tolerantAiDefaults,
+          analysisReason: `AI response schema validation failed: ${parsed.error.issues
+            .slice(0, 3)
+            .map((i) => `${i.path.join(".") || "root"}: ${i.message}`)
+            .join("; ")
+            .slice(0, 300)}`
+        };
     const neutralEnabled = Boolean(opportunity.workspace?.neutralCommentsEnabled);
     let finalIntent = result.commentIntent;
     if (!neutralEnabled && (finalIntent === "neutral_opinion" || finalIntent === "clarifying_question")) {
       finalIntent = "skip";
     }
 
-    const shouldComment = result.shouldComment && finalIntent !== "skip";
+    const shouldComment = parsed.success && result.shouldComment && finalIntent !== "skip";
     const analysisStatus = shouldComment
       ? OpportunityAnalysisStatus.ANALYZED
-      : OpportunityAnalysisStatus.SKIPPED;
+      : parsed.success
+        ? OpportunityAnalysisStatus.SKIPPED
+        : OpportunityAnalysisStatus.FAILED;
     const status = shouldComment ? OpportunityStatus.NEW : OpportunityStatus.SKIPPED;
 
     await prismaAny.commentOpportunity.update({
