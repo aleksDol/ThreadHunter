@@ -206,6 +206,22 @@ function randomMinutes(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function canWorkspaceDispatch(workspace: {
+  subscriptionStatus?: string | null;
+  trialEndsAt?: Date | null;
+  commentLimit?: number | null;
+  commentsSentCount?: number | null;
+}): boolean {
+  const subscriptionStatus = String(workspace.subscriptionStatus || "");
+  if (subscriptionStatus === "active") return true;
+  if (subscriptionStatus !== "trialing") return false;
+
+  if (workspace.trialEndsAt && new Date() > new Date(workspace.trialEndsAt)) return false;
+  const limit = Number(workspace.commentLimit ?? 20);
+  const sent = Number(workspace.commentsSentCount ?? 0);
+  return sent < limit;
+}
+
 async function rewriteToCompactComment(originalText: string): Promise<string> {
   if (!openai) return originalText;
 
@@ -383,6 +399,16 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
 
   if (!eligible) return;
 
+  const existingActive = await prisma.generatedComment.findFirst({
+    where: {
+      workspaceId: opportunity.workspaceId,
+      opportunityId: opportunity.id,
+      status: { in: [GeneratedCommentStatus.DRAFT, GeneratedCommentStatus.QUEUED, GeneratedCommentStatus.SENT] }
+    },
+    select: { id: true }
+  });
+  if (existingActive) return;
+
   if (!openai) {
     await prismaAny.generatedComment.create({
       data: {
@@ -508,7 +534,7 @@ async function generateComment(payload: z.infer<typeof generationPayloadSchema>)
       }
     });
 
-    if (safety.passed) {
+    if (safety.passed && canWorkspaceDispatch(opportunity.workspace || {})) {
       const accountId = opportunity.telegramAccountId || opportunity.monitoredChannel?.telegramAccountId;
       if (!accountId) return;
 

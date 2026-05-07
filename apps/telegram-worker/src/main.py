@@ -356,7 +356,8 @@ def get_workspace_dispatch_block_reason(ctx: dict[str, Any]) -> Optional[str]:
 
     if subscription_status == "trialing":
         trial_ends_at = ctx.get("trialEndsAt")
-        if trial_ends_at and utc_now() > trial_ends_at:
+        trial_ends_at_utc = as_utc(trial_ends_at)
+        if trial_ends_at_utc and utc_now() > trial_ends_at_utc:
             return "Trial ended. Upgrade to continue sending comments."
 
         limit = int(ctx.get("commentLimit") or 20)
@@ -1089,6 +1090,7 @@ def main() -> None:
                 _, raw = dispatch_item
                 payload = parse_dispatch_payload(raw)
                 if payload:
+                    print(f"[telegram-worker] dispatch queue item received: {payload.get('dispatchJobId')}")
                     asyncio.run(process_dispatch_job(conn, payload, api_id, api_hash, enc_key))
 
             owned_channel_item = r.blpop(OWNED_CHANNEL_SYNC_QUEUE_NAME, timeout=1)

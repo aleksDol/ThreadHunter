@@ -139,14 +139,6 @@ async function processJob(jobId: string): Promise<void> {
         .plus({ minutes: state.minDelayMinutes }) <= nowTz);
 
   if (readyNow) {
-    await prisma.dispatchJob.update({
-      where: { id: job.id },
-      data: {
-        status: DispatchStatus.READY,
-        error: null
-      }
-    });
-
     if (!job.queuedAt) {
       const payload = {
         type: "send_comment" as const,
@@ -160,15 +152,28 @@ async function processJob(jobId: string): Promise<void> {
         await redis.rpush(TELEGRAM_DISPATCH_QUEUE_NAME, JSON.stringify(payload));
         await prisma.dispatchJob.update({
           where: { id: job.id },
-          data: { queuedAt: new Date(), error: null }
+          data: { status: DispatchStatus.READY, queuedAt: new Date(), error: null }
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Failed to queue telegram dispatch";
         await prisma.dispatchJob.update({
           where: { id: job.id },
-          data: { error: `Queue push failed: ${reason}`.slice(0, 1000) }
+          data: {
+            status: DispatchStatus.SCHEDULED,
+            queuedAt: null,
+            scheduledAt: new Date(Date.now() + 60 * 1000),
+            error: `Queue push failed: ${reason}`.slice(0, 1000)
+          }
         });
       }
+    } else {
+      await prisma.dispatchJob.update({
+        where: { id: job.id },
+        data: {
+          status: DispatchStatus.READY,
+          error: null
+        }
+      });
     }
     return;
   }
@@ -189,7 +194,7 @@ async function tick(): Promise<void> {
     where: {
       status: DispatchStatus.READY,
       sentAt: null,
-      queuedAt: { not: null, lte: readyStuckBefore }
+      OR: [{ queuedAt: { not: null, lte: readyStuckBefore } }, { queuedAt: null }]
     },
     data: {
       status: DispatchStatus.SCHEDULED,
