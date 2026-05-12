@@ -20,6 +20,7 @@ export class ApiError extends Error {
 export type AuthUser = {
   id: string;
   email: string | null;
+  isAdmin: boolean;
   telegramId: string | null;
   username: string | null;
   firstName: string | null;
@@ -274,6 +275,66 @@ export type WorkspaceSettings = {
   neutralCommentsEnabled: boolean;
 };
 
+export type AdminUserListItem = {
+  userId: string;
+  email: string | null;
+  telegramId: string | null;
+  username: string | null;
+  telegramVerifiedAt: string | null;
+  createdAt: string;
+  isAdmin: boolean;
+  workspace: {
+    id: string;
+    name: string;
+    plan: string;
+    subscriptionStatus: string;
+    trialStartedAt: string | null;
+    trialEndsAt: string | null;
+    commentLimit: number;
+    commentsSentCount: number;
+    neutralCommentsEnabled: boolean;
+  } | null;
+};
+
+export type AdminUserDetails = {
+  user: {
+    id: string;
+    email: string | null;
+    telegramId: string | null;
+    username: string | null;
+    firstName: string | null;
+    telegramVerifiedAt: string | null;
+    createdAt: string;
+    isAdmin: boolean;
+  };
+  workspace: {
+    id: string;
+    name: string;
+    plan: string;
+    trialStartedAt: string | null;
+    trialEndsAt: string | null;
+    subscriptionStatus: string;
+    commentLimit: number;
+    commentsSentCount: number;
+    neutralCommentsEnabled: boolean;
+    createdAt: string;
+  } | null;
+  stats?: {
+    telegramAccounts: {
+      total: number;
+      byStatus: Array<{ status: string; _count: { _all: number } }>;
+    };
+    monitoredChannels: {
+      total: number;
+      byStatus: Array<{ status: string; _count: { _all: number } }>;
+    };
+    ownedChannelsCount: number;
+    generatedCommentsCount: number;
+    commentsSentCount: number;
+    lastActivityAt: string | null;
+  };
+};
+
 export type CommentOpportunity = {
   id: string;
   workspaceId: string;
@@ -480,3 +541,19 @@ export const getMe = () => apiFetch<AuthMeResponse>("/auth/me");
 
 export const startTelegramVerification = () =>
   apiFetch<{ botUrl: string; expiresAt: string }>("/auth/telegram-verification/start", { method: "POST" });
+
+export const adminListUsers = () => apiFetch<AdminUserListItem[]>("/admin/users");
+export const adminGetUser = (userId: string) => apiFetch<AdminUserDetails>(`/admin/users/${userId}`);
+export const adminPatchWorkspaceBilling = (
+  workspaceId: string,
+  input: {
+    plan?: "trial" | "pro" | "blocked";
+    subscriptionStatus?: "trialing" | "active" | "blocked" | "expired";
+    trialEndsAt?: string | null;
+    commentLimit?: number;
+    commentsSentCount?: number;
+  }
+) => apiFetch<{ workspace: AdminUserListItem["workspace"] }>(`/admin/workspaces/${workspaceId}/billing`, {
+  method: "PATCH",
+  body: JSON.stringify(input)
+});

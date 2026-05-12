@@ -1,6 +1,8 @@
 import { NextFunction, Request, Response } from "express";
 
 import { verifySessionToken, type AuthTokenPayload } from "../modules/auth/jwt";
+import { prisma } from "../config/prisma";
+const prismaAny = prisma as any;
 
 declare global {
   namespace Express {
@@ -37,6 +39,28 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
   if (!auth) {
     res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  req.auth = auth;
+  next();
+}
+
+export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const auth = getAuthContext(req);
+
+  if (!auth) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const user = await prismaAny.user.findUnique({
+    where: { id: auth.userId },
+    select: { isAdmin: true }
+  });
+
+  if (!user?.isAdmin) {
+    res.status(403).json({ error: "Forbidden" });
     return;
   }
 

@@ -18,10 +18,25 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   TELEGRAM_SESSION_ENCRYPTION_KEY: z.string().optional(),
   TELEGRAM_VERIFY_BOT_USERNAME: z.string().optional(),
-  INTERNAL_BOT_SECRET: z.string().optional()
+  INTERNAL_BOT_SECRET: z.string().optional(),
+  ADMIN_EMAILS: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);
+
+export function getAdminEmails(): Set<string> {
+  const raw = env.ADMIN_EMAILS?.trim();
+  if (!raw) {
+    return new Set();
+  }
+
+  return new Set(
+    raw
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 export function getJwtSecretOrThrow(): string {
   const secret = env.JWT_SECRET;

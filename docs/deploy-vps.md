@@ -78,6 +78,7 @@ sudo certbot --nginx -d comm.copilot-send-mes.ru
 - `TELEGRAM_VERIFY_BOT_USERNAME`
 - `TELEGRAM_VERIFY_BOT_TOKEN`
 - `INTERNAL_BOT_SECRET`
+- `ADMIN_EMAILS` (через запятую, например `admin@example.com,owner@example.com`)
 
 Опционально для нестабильного доступа к Telegram только на этапе QR-login:
 
@@ -139,3 +140,9 @@ docker compose -p expert-comment -f docker-compose.prod.yml --env-file .env.prod
 ### Trial/limit reached
 - Проверьте `/billing/status`
 - Если `canDispatch=false`, отправка блокируется до активации
+
+### Назначить админа вручную
+- Через SQL в postgres:
+```sql
+UPDATE "User" SET "isAdmin" = true WHERE email = 'admin@example.com';
+```

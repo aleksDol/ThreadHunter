@@ -4,6 +4,7 @@ import express from "express";
 
 import { env } from "./config/env";
 import authRoutes from "./modules/auth/routes";
+import adminRoutes from "./modules/admin/routes";
 import billingRoutes from "./modules/billing/routes";
 import commentsRoutes from "./modules/comments/routes";
 import internalAuthRoutes from "./modules/internal-auth/routes";
@@ -12,7 +13,7 @@ import monitoredChannelsRoutes from "./modules/monitored-channels/routes";
 import ownedChannelsRoutes from "./modules/owned-channels/routes";
 import telegramAccountsRoutes from "./modules/telegram-accounts/routes";
 import workspacesRoutes from "./modules/workspaces/routes";
-import { requireAuth } from "./middleware/auth";
+import { requireAdmin, requireAuth } from "./middleware/auth";
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use("/owned-channels", requireAuth, ownedChannelsRoutes);
 app.use("/knowledge-base", requireAuth, knowledgeBaseRoutes);
 app.use("/comments", requireAuth, commentsRoutes);
 app.use("/billing", requireAuth, billingRoutes);
+app.use("/admin", requireAdmin, adminRoutes);
 
 app.listen(env.API_PORT, () => {
   console.log(`API is running on port ${env.API_PORT}`);

@@ -8,13 +8,14 @@ import Button from "../../../components/ui/button";
 import { apiFetch } from "../../../src/lib/api-client";
 import { cn } from "../../../src/lib/cn";
 
-const navItems = [
+const navItems: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: "/dashboard/comments", label: "Комментарии" },
   { href: "/dashboard/accounts", label: "Аккаунты" },
   { href: "/dashboard/channels", label: "Каналы" },
   { href: "/dashboard/knowledge", label: "AI Context" },
-  { href: "/dashboard/billing", label: "Оплата" }
-] as const;
+  { href: "/dashboard/billing", label: "Оплата" },
+  { href: "/dashboard/admin", label: "Админка", adminOnly: true }
+];
 
 const titleMap: Record<string, string> = {
   "/dashboard": "Обзор",
@@ -23,22 +24,25 @@ const titleMap: Record<string, string> = {
   "/dashboard/channels": "Каналы",
   "/dashboard/knowledge": "AI Context",
   "/dashboard/billing": "Оплата и лимиты",
+  "/dashboard/admin": "Админка",
   "/dashboard/settings": "Настройки"
 };
 
 type MeResponse = {
-  user: { firstName: string | null; username: string | null };
+  user: { firstName: string | null; username: string | null; isAdmin: boolean };
 };
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [userLabel, setUserLabel] = useState("Пользователь");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     apiFetch<MeResponse>("/auth/me")
       .then((res) => {
         setUserLabel(res.user.firstName || res.user.username || "Пользователь");
+        setIsAdmin(res.user.isAdmin);
       })
       .catch(() => undefined);
   }, []);
@@ -59,6 +63,9 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           </div>
           <nav className="space-y-2">
             {navItems.map((item) => {
+              if (item.adminOnly && !isAdmin) {
+                return null;
+              }
               const active = pathname === item.href;
               return (
                 <Link

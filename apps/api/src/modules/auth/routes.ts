@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { Response, Router } from "express";
 import { z } from "zod";
 
-import { env, getJwtSecretOrThrow } from "../../config/env";
+import { env, getAdminEmails, getJwtSecretOrThrow } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { getAuthContext } from "../../middleware/auth";
 import { createRateLimiter, getClientIp } from "../../middleware/rate-limit";
@@ -13,6 +13,7 @@ import { signSessionToken } from "./jwt";
 import { verifyTelegramAuthHash } from "./telegram-auth";
 
 const router = Router();
+const prismaAny = prisma as any;
 
 const telegramPayloadSchema = z.object({
   id: z.union([z.string(), z.number()]),
@@ -37,6 +38,7 @@ const loginSchema = z.object({
 const MAX_AUTH_AGE_SECONDS = 24 * 60 * 60;
 const MAX_FUTURE_SKEW_SECONDS = 5 * 60;
 const TELEGRAM_VERIFY_TOKEN_TTL_MS = 15 * 60 * 1000;
+const ADMIN_EMAILS = getAdminEmails();
 
 const loginRateLimit = createRateLimiter({
   scope: "auth_login",
@@ -116,6 +118,10 @@ async function ensureWorkspaceForUser(user: { id: string; username: string | nul
   return workspace;
 }
 
+function shouldBeAdmin(email: string | null | undefined): boolean {
+  return !!email && ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
+
 router.post("/register", registerRateLimit, async (req, res) => {
   try {
     getJwtSecretOrThrow();
@@ -131,7 +137,7 @@ router.post("/register", registerRateLimit, async (req, res) => {
   }
 
   const { email, password } = parsed.data;
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await prismaAny.user.findUnique({ where: { email } });
   if (existing) {
     console.info("[auth_event]", { event: "register_failed_email_exists", email });
     res.status(409).json({ error: "Email already in use" });
@@ -139,10 +145,11 @@ router.post("/register", registerRateLimit, async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
+  const user = await prismaAny.user.create({
     data: {
       email,
-      passwordHash
+      passwordHash,
+      isAdmin: shouldBeAdmin(email)
     }
   });
 
@@ -155,6 +162,7 @@ router.post("/register", registerRateLimit, async (req, res) => {
     user: {
       id: user.id,
       email: user.email,
+      isAdmin: user.isAdmin,
       telegramId: user.telegramId,
       username: user.username,
       firstName: user.firstName,
@@ -182,7 +190,7 @@ router.post("/login", loginRateLimit, async (req, res) => {
   }
 
   const { email, password } = parsed.data;
-  const user = await prisma.user.findUnique({ where: { email } });
+  let user = await prismaAny.user.findUnique({ where: { email } });
 
   if (!user?.passwordHash) {
     console.info("[auth_event]", { event: "login_failed", email });
@@ -197,6 +205,14 @@ router.post("/login", loginRateLimit, async (req, res) => {
     return;
   }
 
+  const expectedAdmin = shouldBeAdmin(user.email);
+  if (user.isAdmin !== expectedAdmin) {
+    user = await prismaAny.user.update({
+      where: { id: user.id },
+      data: { isAdmin: expectedAdmin }
+    });
+  }
+
   const workspace = await ensureWorkspaceForUser({ id: user.id, username: user.username ?? null });
   const token = signSessionToken({ userId: user.id, workspaceId: workspace.id, role: "owner" });
   setSessionCookie(res, token);
@@ -206,6 +222,7 @@ router.post("/login", loginRateLimit, async (req, res) => {
     user: {
       id: user.id,
       email: user.email,
+      isAdmin: user.isAdmin,
       telegramId: user.telegramId,
       username: user.username,
       firstName: user.firstName,
@@ -317,7 +334,7 @@ router.post("/telegram", async (req, res) => {
     }
   }
 
-  const user = await prisma.user.upsert({
+  let user = await prismaAny.user.upsert({
     where: { telegramId },
     update: {
       username: payload.username,
@@ -331,6 +348,14 @@ router.post("/telegram", async (req, res) => {
       telegramVerifiedAt: new Date()
     }
   });
+
+  const expectedAdmin = shouldBeAdmin(user.email);
+  if (user.isAdmin !== expectedAdmin) {
+    user = await prismaAny.user.update({
+      where: { id: user.id },
+      data: { isAdmin: expectedAdmin }
+    });
+  }
 
   const workspace = await ensureWorkspaceForUser({ id: user.id, username: user.username ?? null });
 
@@ -346,6 +371,7 @@ router.post("/telegram", async (req, res) => {
     user: {
       id: user.id,
       email: user.email,
+      isAdmin: user.isAdmin,
       telegramId: user.telegramId,
       username: user.username,
       firstName: user.firstName,
@@ -367,7 +393,7 @@ router.get("/me", async (req, res) => {
   }
 
   const [user, workspace] = await Promise.all([
-    prisma.user.findUnique({ where: { id: auth.userId } }),
+    prismaAny.user.findUnique({ where: { id: auth.userId } }),
     prisma.workspace.findUnique({ where: { id: auth.workspaceId } })
   ]);
 
@@ -380,6 +406,7 @@ router.get("/me", async (req, res) => {
     user: {
       id: user.id,
       email: user.email,
+      isAdmin: user.isAdmin,
       telegramId: user.telegramId,
       username: user.username,
       firstName: user.firstName,
