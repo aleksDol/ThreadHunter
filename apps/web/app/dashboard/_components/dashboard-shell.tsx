@@ -14,6 +14,7 @@ const navItems: Array<{ href: Route; label: string; adminOnly?: boolean }> = [
   { href: "/dashboard/accounts", label: "Аккаунты" },
   { href: "/dashboard/channels", label: "Каналы" },
   { href: "/dashboard/knowledge", label: "AI Context" },
+  { href: "/dashboard/settings", label: "Настройки" },
   { href: "/dashboard/billing", label: "Оплата" },
   { href: "/dashboard/admin", label: "Админка", adminOnly: true }
 ];

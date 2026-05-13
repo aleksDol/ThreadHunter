@@ -76,7 +76,32 @@ export default function ChannelsPage() {
     }
   }
 
-  const problemChannels = useMemo(() => health.filter((h) => h.health !== "OK"), [health]);
+  const preparingChannels = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.joinStatus === "PENDING" ||
+          item.joinStatus === "JOINING" ||
+          item.discussionJoinStatus === "PENDING" ||
+          item.discussionJoinStatus === "JOINING"
+      ),
+    [items]
+  );
+
+  const readyChannelsCount = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          (item.joinStatus === "JOINED" || item.joinStatus === "NOT_REQUIRED") &&
+          (item.discussionJoinStatus === "JOINED" || item.discussionJoinStatus === "NOT_REQUIRED")
+      ).length,
+    [items]
+  );
+
+  const problemChannels = useMemo(
+    () => health.filter((h) => h.health !== "OK" && h.health !== "ACCESS_PREPARING"),
+    [health]
+  );
 
   return (
     <div className="space-y-6">
@@ -102,6 +127,31 @@ export default function ChannelsPage() {
           </select>
           <Button type="submit">Добавить канал</Button>
         </form>
+      </Card>
+
+      <Card className="space-y-3 border-sky-200 bg-sky-50">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-5 w-5 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600" />
+          <h3 className="text-lg font-semibold text-sky-800">Готовим доступ</h3>
+        </div>
+        <p className="text-sm text-slate-700">
+          Доступ готов: <span className="font-semibold">{readyChannelsCount}</span> из{" "}
+          <span className="font-semibold">{items.length}</span>. В процессе:{" "}
+          <span className="font-semibold">{preparingChannels.length}</span>.
+        </p>
+        {preparingChannels.length > 0 ? (
+          <div className="space-y-2">
+            {preparingChannels.map((channel) => (
+              <div key={channel.id} className="rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <p className="font-medium text-sky-800">@{channel.username}</p>
+                <p>Статус: {joinStatusText(channel.joinStatus)} / {discussionStatusText(channel.discussionJoinStatus)}</p>
+                <p>Следующая попытка: {channel.nextJoinAttemptAt ? new Date(channel.nextJoinAttemptAt).toLocaleString() : "-"}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">Сейчас нет каналов в очереди подготовки.</p>
+        )}
       </Card>
 
       {problemChannels.length > 0 ? (
