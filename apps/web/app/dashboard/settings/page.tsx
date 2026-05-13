@@ -50,10 +50,10 @@ export default function SettingsPage() {
     <div className="space-y-6">
       {error ? <ErrorAlert message={error} /> : null}
       <Card>
-        <h2 className="mb-2 text-lg font-semibold">Нейтральные комментарии</h2>
+        <h2 className="mb-2 text-lg font-semibold">РќРµР№С‚СЂР°Р»СЊРЅС‹Рµ РєРѕРјРјРµРЅС‚Р°СЂРёРё</h2>
         <p className="mb-4 text-sm text-slate-600">
-          Если включено, AI сможет оставлять не только экспертные комментарии, но и короткие мнения, уточняющие
-          вопросы и нейтральные реакции по теме поста.
+          Р•СЃР»Рё РІРєР»СЋС‡РµРЅРѕ, AI СЃРјРѕР¶РµС‚ РѕСЃС‚Р°РІР»СЏС‚СЊ РЅРµ С‚РѕР»СЊРєРѕ СЌРєСЃРїРµСЂС‚РЅС‹Рµ РєРѕРјРјРµРЅС‚Р°СЂРёРё, РЅРѕ Рё РєРѕСЂРѕС‚РєРёРµ РјРЅРµРЅРёСЏ, СѓС‚РѕС‡РЅСЏСЋС‰РёРµ
+          РІРѕРїСЂРѕСЃС‹ Рё РЅРµР№С‚СЂР°Р»СЊРЅС‹Рµ СЂРµР°РєС†РёРё РїРѕ С‚РµРјРµ РїРѕСЃС‚Р°.
         </p>
 
         <label className="flex items-center gap-3 text-sm">
@@ -63,31 +63,31 @@ export default function SettingsPage() {
             onChange={(e) => setNeutralCommentsEnabled(e.target.checked)}
             disabled={loading || saving}
           />
-          Включить нейтральные комментарии
+          Р’РєР»СЋС‡РёС‚СЊ РЅРµР№С‚СЂР°Р»СЊРЅС‹Рµ РєРѕРјРјРµРЅС‚Р°СЂРёРё
         </label>
 
         {neutralCommentsEnabled ? (
           <div className="mt-5 space-y-3">
-            <h3 className="text-base font-semibold">Режим комментариев</h3>
+            <h3 className="text-base font-semibold">Р РµР¶РёРј РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ</h3>
 
             <label className="block rounded-xl border border-slate-200 p-3 text-sm">
               <input type="radio" name="mix" className="mr-2" checked={commentMixPreset === "cautious"} onChange={() => setCommentMixPreset("cautious")} />
-              <span className="font-medium">Осторожный</span>
-              <p className="mt-1 text-slate-600">Больше экспертных комментариев, минимум вопросов. Подходит новым аккаунтам.</p>
+              <span className="font-medium">РћСЃС‚РѕСЂРѕР¶РЅС‹Р№</span>
+              <p className="mt-1 text-slate-600">Р‘РѕР»СЊС€Рµ СЌРєСЃРїРµСЂС‚РЅС‹С… РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ, РјРёРЅРёРјСѓРј РІРѕРїСЂРѕСЃРѕРІ. РџРѕРґС…РѕРґРёС‚ РЅРѕРІС‹Рј Р°РєРєР°СѓРЅС‚Р°Рј.</p>
               <p className="mt-1 text-slate-500">80 / 15 / 5</p>
             </label>
 
             <label className="block rounded-xl border border-slate-200 p-3 text-sm">
               <input type="radio" name="mix" className="mr-2" checked={commentMixPreset === "balanced"} onChange={() => setCommentMixPreset("balanced")} />
-              <span className="font-medium">Сбалансированный</span>
-              <p className="mt-1 text-slate-600">Оптимальное соотношение экспертных комментариев, мнений и вопросов.</p>
+              <span className="font-medium">РЎР±Р°Р»Р°РЅСЃРёСЂРѕРІР°РЅРЅС‹Р№</span>
+              <p className="mt-1 text-slate-600">РћРїС‚РёРјР°Р»СЊРЅРѕРµ СЃРѕРѕС‚РЅРѕС€РµРЅРёРµ СЌРєСЃРїРµСЂС‚РЅС‹С… РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ, РјРЅРµРЅРёР№ Рё РІРѕРїСЂРѕСЃРѕРІ.</p>
               <p className="mt-1 text-slate-500">60 / 25 / 15</p>
             </label>
 
             <label className="block rounded-xl border border-slate-200 p-3 text-sm">
               <input type="radio" name="mix" className="mr-2" checked={commentMixPreset === "active"} onChange={() => setCommentMixPreset("active")} />
-              <span className="font-medium">Активный</span>
-              <p className="mt-1 text-slate-600">Больше нейтральных мнений и вопросов для более живого присутствия.</p>
+              <span className="font-medium">РђРєС‚РёРІРЅС‹Р№</span>
+              <p className="mt-1 text-slate-600">Р‘РѕР»СЊС€Рµ РЅРµР№С‚СЂР°Р»СЊРЅС‹С… РјРЅРµРЅРёР№ Рё РІРѕРїСЂРѕСЃРѕРІ РґР»СЏ Р±РѕР»РµРµ Р¶РёРІРѕРіРѕ РїСЂРёСЃСѓС‚СЃС‚РІРёСЏ.</p>
               <p className="mt-1 text-slate-500">40 / 35 / 25</p>
             </label>
           </div>
@@ -95,7 +95,7 @@ export default function SettingsPage() {
 
         <div className="mt-4">
           <Button onClick={onSave} disabled={loading || saving}>
-            {saving ? "Сохраняем..." : "Сохранить"}
+            {saving ? "РЎРѕС…СЂР°РЅСЏРµРј..." : "РЎРѕС…СЂР°РЅРёС‚СЊ"}
           </Button>
         </div>
       </Card>

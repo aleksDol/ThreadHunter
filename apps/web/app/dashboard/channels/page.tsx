@@ -28,18 +28,18 @@ function healthLabel(code: ChannelHealth["health"]): string {
 }
 
 function joinStatusText(status: MonitoredChannel["joinStatus"]): string {
-  if (status === "PENDING") return "Готовим доступ";
-  if (status === "JOINING") return "Подписываемся";
-  if (status === "JOINED") return "Доступ готов";
-  if (status === "FAILED") return "Ошибка доступа";
-  if (status === "NOT_REQUIRED") return "Доступ уже есть";
+  if (status === "PENDING") return "Р“РѕС‚РѕРІРёРј РґРѕСЃС‚СѓРї";
+  if (status === "JOINING") return "РџРѕРґРїРёСЃС‹РІР°РµРјСЃСЏ";
+  if (status === "JOINED") return "Р”РѕСЃС‚СѓРї РіРѕС‚РѕРІ";
+  if (status === "FAILED") return "РћС€РёР±РєР° РґРѕСЃС‚СѓРїР°";
+  if (status === "NOT_REQUIRED") return "Р”РѕСЃС‚СѓРї СѓР¶Рµ РµСЃС‚СЊ";
   return "-";
 }
 
 function discussionStatusText(status: MonitoredChannel["discussionJoinStatus"]): string {
-  if (status === "JOINED" || status === "NOT_REQUIRED") return "Комментарии проверены";
-  if (status === "PENDING" || status === "JOINING") return "Проверяем комментарии";
-  if (status === "FAILED") return "Проблема с комментариями";
+  if (status === "JOINED" || status === "NOT_REQUIRED") return "РљРѕРјРјРµРЅС‚Р°СЂРёРё РїСЂРѕРІРµСЂРµРЅС‹";
+  if (status === "PENDING" || status === "JOINING") return "РџСЂРѕРІРµСЂСЏРµРј РєРѕРјРјРµРЅС‚Р°СЂРёРё";
+  if (status === "FAILED") return "РџСЂРѕР±Р»РµРјР° СЃ РєРѕРјРјРµРЅС‚Р°СЂРёСЏРјРё";
   return "-";
 }
 
@@ -80,12 +80,12 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-slate-600">Мониторинг работает только с новыми постами после запуска. Старые посты не сканируются.</p>
+      <p className="text-sm text-slate-600">РњРѕРЅРёС‚РѕСЂРёРЅРі СЂР°Р±РѕС‚Р°РµС‚ С‚РѕР»СЊРєРѕ СЃ РЅРѕРІС‹РјРё РїРѕСЃС‚Р°РјРё РїРѕСЃР»Рµ Р·Р°РїСѓСЃРєР°. РЎС‚Р°СЂС‹Рµ РїРѕСЃС‚С‹ РЅРµ СЃРєР°РЅРёСЂСѓСЋС‚СЃСЏ.</p>
       {error ? <ErrorAlert message={error} /> : null}
 
       <Card>
-        <h2 className="mb-4 text-lg font-semibold">Добавить канал</h2>
-        <p className="mb-3 text-sm text-slate-600">После добавления система аккуратно подготовит доступ: подпишется на канал и проверит комментарии. Обычно это занимает от нескольких минут до суток.</p>
+        <h2 className="mb-4 text-lg font-semibold">Р”РѕР±Р°РІРёС‚СЊ РєР°РЅР°Р»</h2>
+        <p className="mb-3 text-sm text-slate-600">РџРѕСЃР»Рµ РґРѕР±Р°РІР»РµРЅРёСЏ СЃРёСЃС‚РµРјР° Р°РєРєСѓСЂР°С‚РЅРѕ РїРѕРґРіРѕС‚РѕРІРёС‚ РґРѕСЃС‚СѓРї: РїРѕРґРїРёС€РµС‚СЃСЏ РЅР° РєР°РЅР°Р» Рё РїСЂРѕРІРµСЂРёС‚ РєРѕРјРјРµРЅС‚Р°СЂРёРё. РћР±С‹С‡РЅРѕ СЌС‚Рѕ Р·Р°РЅРёРјР°РµС‚ РѕС‚ РЅРµСЃРєРѕР»СЊРєРёС… РјРёРЅСѓС‚ РґРѕ СЃСѓС‚РѕРє.</p>
         <form onSubmit={onSubmit} className="space-y-3">
           <Input placeholder="username or t.me link" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <select
@@ -100,18 +100,18 @@ export default function ChannelsPage() {
               </option>
             ))}
           </select>
-          <Button type="submit">Добавить канал</Button>
+          <Button type="submit">Р”РѕР±Р°РІРёС‚СЊ РєР°РЅР°Р»</Button>
         </form>
       </Card>
 
       {problemChannels.length > 0 ? (
         <Card className="space-y-3 border-rose-200 bg-rose-50">
-          <h3 className="text-lg font-semibold text-rose-700">Проблемные каналы</h3>
+          <h3 className="text-lg font-semibold text-rose-700">РџСЂРѕР±Р»РµРјРЅС‹Рµ РєР°РЅР°Р»С‹</h3>
           {problemChannels.map((problem) => (
             <div key={problem.channelId} className="rounded-2xl border border-rose-200 bg-white px-4 py-3">
               <p className="font-medium text-rose-700">@{problem.username}</p>
-              <p className="text-sm text-slate-700">Причина: {healthLabel(problem.health)}</p>
-              <p className="text-sm text-slate-600">Что сделать: {problem.advice}</p>
+              <p className="text-sm text-slate-700">РџСЂРёС‡РёРЅР°: {healthLabel(problem.health)}</p>
+              <p className="text-sm text-slate-600">Р§С‚Рѕ СЃРґРµР»Р°С‚СЊ: {problem.advice}</p>
             </div>
           ))}
         </Card>
@@ -119,9 +119,9 @@ export default function ChannelsPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          title="Добавьте каналы для мониторинга"
-          description="Система сама найдёт обсуждения и начнёт готовить комментарии после запуска AUTO-комментинга."
-          ctaLabel="Добавить канал"
+          title="Р”РѕР±Р°РІСЊС‚Рµ РєР°РЅР°Р»С‹ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР°"
+          description="РЎРёСЃС‚РµРјР° СЃР°РјР° РЅР°Р№РґС‘С‚ РѕР±СЃСѓР¶РґРµРЅРёСЏ Рё РЅР°С‡РЅС‘С‚ РіРѕС‚РѕРІРёС‚СЊ РєРѕРјРјРµРЅС‚Р°СЂРёРё РїРѕСЃР»Рµ Р·Р°РїСѓСЃРєР° AUTO-РєРѕРјРјРµРЅС‚РёРЅРіР°."
+          ctaLabel="Р”РѕР±Р°РІРёС‚СЊ РєР°РЅР°Р»"
           ctaHref="/dashboard/channels"
         />
       ) : (
@@ -132,17 +132,17 @@ export default function ChannelsPage() {
                 <p className="font-medium">@{item.username}</p>
                 <Badge variant="info">{item.status}</Badge>
               </div>
-              <p className="text-sm text-slate-600">Подготовка доступа: {joinStatusText(item.joinStatus)}</p>
-              <p className="text-sm text-slate-600">Комментарии: {discussionStatusText(item.discussionJoinStatus)}</p>
-              <p className="text-sm text-slate-600">Следующая попытка: {item.nextJoinAttemptAt ? new Date(item.nextJoinAttemptAt).toLocaleString() : "-"}</p>
-              <p className="text-sm text-slate-600">Последняя синхронизация: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "-"}</p>
+              <p className="text-sm text-slate-600">РџРѕРґРіРѕС‚РѕРІРєР° РґРѕСЃС‚СѓРїР°: {joinStatusText(item.joinStatus)}</p>
+              <p className="text-sm text-slate-600">РљРѕРјРјРµРЅС‚Р°СЂРёРё: {discussionStatusText(item.discussionJoinStatus)}</p>
+              <p className="text-sm text-slate-600">РЎР»РµРґСѓСЋС‰Р°СЏ РїРѕРїС‹С‚РєР°: {item.nextJoinAttemptAt ? new Date(item.nextJoinAttemptAt).toLocaleString() : "-"}</p>
+              <p className="text-sm text-slate-600">РџРѕСЃР»РµРґРЅСЏСЏ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "-"}</p>
               {item.joinError ? <p className="text-sm text-rose-700">{item.joinError}</p> : null}
               {item.discussionJoinError ? <p className="text-sm text-rose-700">{item.discussionJoinError}</p> : null}
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={async () => { try { await startMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Запустить</Button>
-                <Button variant="ghost" onClick={async () => { try { await stopMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Остановить</Button>
-                <Button variant="secondary" onClick={async () => { try { await retryMonitoredChannelJoin(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Повторить подготовку доступа</Button>
-                <Button variant="secondary" onClick={async () => { try { await deleteMonitoredChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Удалить</Button>
+                <Button variant="secondary" onClick={async () => { try { await startMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Р—Р°РїСѓСЃС‚РёС‚СЊ</Button>
+                <Button variant="ghost" onClick={async () => { try { await stopMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>РћСЃС‚Р°РЅРѕРІРёС‚СЊ</Button>
+                <Button variant="secondary" onClick={async () => { try { await retryMonitoredChannelJoin(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>РџРѕРІС‚РѕСЂРёС‚СЊ РїРѕРґРіРѕС‚РѕРІРєСѓ РґРѕСЃС‚СѓРїР°</Button>
+                <Button variant="secondary" onClick={async () => { try { await deleteMonitoredChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>РЈРґР°Р»РёС‚СЊ</Button>
               </div>
             </Card>
           ))}

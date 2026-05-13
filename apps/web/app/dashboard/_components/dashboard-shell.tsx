@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -8,7 +9,7 @@ import Button from "../../../components/ui/button";
 import { apiFetch } from "../../../src/lib/api-client";
 import { cn } from "../../../src/lib/cn";
 
-const navItems: Array<{ href: string; label: string; adminOnly?: boolean }> = [
+const navItems: Array<{ href: Route; label: string; adminOnly?: boolean }> = [
   { href: "/dashboard/comments", label: "Комментарии" },
   { href: "/dashboard/accounts", label: "Аккаунты" },
   { href: "/dashboard/channels", label: "Каналы" },
