@@ -28,18 +28,18 @@ function healthLabel(code: ChannelHealth["health"]): string {
 }
 
 function joinStatusText(status: MonitoredChannel["joinStatus"]): string {
-  if (status === "PENDING") return "Готовим доступ";
-  if (status === "JOINING") return "Подписываемся";
-  if (status === "JOINED") return "Доступ готов";
-  if (status === "FAILED") return "Ошибка доступа";
-  if (status === "NOT_REQUIRED") return "Доступ уже есть";
+  if (status === "PENDING") return "??????? ??????";
+  if (status === "JOINING") return "?????????????";
+  if (status === "JOINED") return "?????? ?????";
+  if (status === "FAILED") return "?????? ???????";
+  if (status === "NOT_REQUIRED") return "?????? ??? ????";
   return "-";
 }
 
 function discussionStatusText(status: MonitoredChannel["discussionJoinStatus"]): string {
-  if (status === "JOINED" || status === "NOT_REQUIRED") return "Комментарии проверены";
-  if (status === "PENDING" || status === "JOINING") return "Проверяем комментарии";
-  if (status === "FAILED") return "Проблема с комментариями";
+  if (status === "JOINED" || status === "NOT_REQUIRED") return "??????????? ?????????";
+  if (status === "PENDING" || status === "JOINING") return "????????? ???????????";
+  if (status === "FAILED") return "???????? ? ?????????????";
   return "-";
 }
 
@@ -80,12 +80,12 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-slate-600">Мониторинг работает только с новыми постами после запуска. Старые посты не сканируются.</p>
+      <p className="text-sm text-slate-600">?????????? ???????? ?????? ? ?????? ??????? ????? ???????. ?????? ????? ?? ???????????.</p>
       {error ? <ErrorAlert message={error} /> : null}
 
       <Card>
-        <h2 className="mb-4 text-lg font-semibold">Добавить канал</h2>
-        <p className="mb-3 text-sm text-slate-600">После добавления система аккуратно подготовит доступ: подпишется на канал и проверит комментарии. Обычно это занимает от нескольких минут до суток.</p>
+        <h2 className="mb-4 text-lg font-semibold">???????? ?????</h2>
+        <p className="mb-3 text-sm text-slate-600">????? ?????????? ??????? ????????? ?????????? ??????: ?????????? ?? ????? ? ???????? ???????????. ?????? ??? ???????? ?? ?????????? ????? ?? ?????.</p>
         <form onSubmit={onSubmit} className="space-y-3">
           <Input placeholder="username or t.me link" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <select
@@ -100,18 +100,18 @@ export default function ChannelsPage() {
               </option>
             ))}
           </select>
-          <Button type="submit">Добавить канал</Button>
+          <Button type="submit">???????? ?????</Button>
         </form>
       </Card>
 
       {problemChannels.length > 0 ? (
         <Card className="space-y-3 border-rose-200 bg-rose-50">
-          <h3 className="text-lg font-semibold text-rose-700">Проблемные каналы</h3>
+          <h3 className="text-lg font-semibold text-rose-700">?????????? ??????</h3>
           {problemChannels.map((problem) => (
             <div key={problem.channelId} className="rounded-2xl border border-rose-200 bg-white px-4 py-3">
               <p className="font-medium text-rose-700">@{problem.username}</p>
-              <p className="text-sm text-slate-700">Причина: {healthLabel(problem.health)}</p>
-              <p className="text-sm text-slate-600">Что сделать: {problem.advice}</p>
+              <p className="text-sm text-slate-700">???????: {healthLabel(problem.health)}</p>
+              <p className="text-sm text-slate-600">??? ???????: {problem.advice}</p>
             </div>
           ))}
         </Card>
@@ -119,9 +119,9 @@ export default function ChannelsPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          title="Добавьте каналы для мониторинга"
-          description="Система сама найдёт обсуждения и начнёт готовить комментарии после запуска AUTO-комментинга."
-          ctaLabel="Добавить канал"
+          title="???????? ?????? ??? ???????????"
+          description="??????? ???? ?????? ?????????? ? ?????? ???????? ??????????? ????? ??????? AUTO-???????????."
+          ctaLabel="???????? ?????"
           ctaHref="/dashboard/channels"
         />
       ) : (
@@ -132,17 +132,17 @@ export default function ChannelsPage() {
                 <p className="font-medium">@{item.username}</p>
                 <Badge variant="info">{item.status}</Badge>
               </div>
-              <p className="text-sm text-slate-600">Подготовка доступа: {joinStatusText(item.joinStatus)}</p>
-              <p className="text-sm text-slate-600">Комментарии: {discussionStatusText(item.discussionJoinStatus)}</p>
-              <p className="text-sm text-slate-600">Следующая попытка: {item.nextJoinAttemptAt ? new Date(item.nextJoinAttemptAt).toLocaleString() : "-"}</p>
-              <p className="text-sm text-slate-600">Последняя синхронизация: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "-"}</p>
+              <p className="text-sm text-slate-600">?????????? ???????: {joinStatusText(item.joinStatus)}</p>
+              <p className="text-sm text-slate-600">???????????: {discussionStatusText(item.discussionJoinStatus)}</p>
+              <p className="text-sm text-slate-600">????????? ???????: {item.nextJoinAttemptAt ? new Date(item.nextJoinAttemptAt).toLocaleString() : "-"}</p>
+              <p className="text-sm text-slate-600">????????? ?????????????: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "-"}</p>
               {item.joinError ? <p className="text-sm text-rose-700">{item.joinError}</p> : null}
               {item.discussionJoinError ? <p className="text-sm text-rose-700">{item.discussionJoinError}</p> : null}
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={async () => { try { await startMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Запустить</Button>
-                <Button variant="ghost" onClick={async () => { try { await stopMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Остановить</Button>
-                <Button variant="secondary" onClick={async () => { try { await retryMonitoredChannelJoin(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Повторить подготовку доступа</Button>
-                <Button variant="secondary" onClick={async () => { try { await deleteMonitoredChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>Удалить</Button>
+                <Button variant="secondary" onClick={async () => { try { await startMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>?????????</Button>
+                <Button variant="ghost" onClick={async () => { try { await stopMonitoringChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>??????????</Button>
+                <Button variant="secondary" onClick={async () => { try { await retryMonitoredChannelJoin(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>????????? ?????????? ???????</Button>
+                <Button variant="secondary" onClick={async () => { try { await deleteMonitoredChannel(item.id); await load(); } catch (e) { setError(mapRawErrorToRu(e instanceof Error ? e.message : "UNKNOWN_ERROR")); } }}>???????</Button>
               </div>
             </Card>
           ))}

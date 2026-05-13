@@ -6,7 +6,7 @@ import { prisma } from "../../config/prisma";
 import { pushTelegramJoinJob, pushTelegramMonitorJob } from "../../config/queue";
 
 const router = Router();
-const JOIN_PENDING_MESSAGE = "Готовим доступ к каналу. Мониторинг начнётся после подписки.";
+const JOIN_PENDING_MESSAGE = "Р“РѕС‚РѕРІРёРј РґРѕСЃС‚СѓРї Рє РєР°РЅР°Р»Сѓ. РњРѕРЅРёС‚РѕСЂРёРЅРі РЅР°С‡РЅС‘С‚СЃСЏ РїРѕСЃР»Рµ РїРѕРґРїРёСЃРєРё.";
 
 function randomMinutes(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -51,7 +51,7 @@ type ChannelHealthCode =
 function mapSyncErrorToHealth(syncError: string | null): ChannelHealthCode {
   if (!syncError) return "OK";
   const lower = syncError.toLowerCase();
-  if (lower.includes("готовим доступ") || lower.includes("после подписки")) return "ACCESS_PREPARING";
+  if (lower.includes("РіРѕС‚РѕРІРёРј РґРѕСЃС‚СѓРї") || lower.includes("РїРѕСЃР»Рµ РїРѕРґРїРёСЃРєРё")) return "ACCESS_PREPARING";
   if (lower.includes("not connected") || lower.includes("no access") || lower.includes("missing encrypted session")) return "NO_ACCESS";
   if (lower.includes("comments unavailable") || lower.includes("discussion")) return "COMMENTS_DISABLED";
   if (lower.includes("restricted")) return "COMMENT_RESTRICTED";
@@ -61,14 +61,14 @@ function mapSyncErrorToHealth(syncError: string | null): ChannelHealthCode {
 }
 
 function healthAdvice(code: ChannelHealthCode): string {
-  if (code === "OK") return "Канал доступен для мониторинга и комментирования.";
-  if (code === "ACCESS_PREPARING") return "Система аккуратно готовит доступ. Мониторинг и комментарии продолжатся автоматически.";
-  if (code === "NO_ACCESS") return "Проверьте подписку аккаунта на канал и статус CONNECTED.";
-  if (code === "COMMENTS_DISABLED") return "В канале отключены комментарии или нет discussion-группы.";
-  if (code === "COMMENT_RESTRICTED") return "У аккаунта есть ограничения на отправку комментариев.";
-  if (code === "FLOOD_WAIT") return "Сработал flood wait. Подождите и попробуйте позже.";
-  if (code === "BANNED_IN_DISCUSSION") return "Аккаунт заблокирован в discussion-группе канала.";
-  return "Проверьте подписку аккаунта, доступ к комментариям и статус аккаунта.";
+  if (code === "OK") return "РљР°РЅР°Р» РґРѕСЃС‚СѓРїРµРЅ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° Рё РєРѕРјРјРµРЅС‚РёСЂРѕРІР°РЅРёСЏ.";
+  if (code === "ACCESS_PREPARING") return "РЎРёСЃС‚РµРјР° Р°РєРєСѓСЂР°С‚РЅРѕ РіРѕС‚РѕРІРёС‚ РґРѕСЃС‚СѓРї. РњРѕРЅРёС‚РѕСЂРёРЅРі Рё РєРѕРјРјРµРЅС‚Р°СЂРёРё РїСЂРѕРґРѕР»Р¶Р°С‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.";
+  if (code === "NO_ACCESS") return "РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґРїРёСЃРєСѓ Р°РєРєР°СѓРЅС‚Р° РЅР° РєР°РЅР°Р» Рё СЃС‚Р°С‚СѓСЃ CONNECTED.";
+  if (code === "COMMENTS_DISABLED") return "Р’ РєР°РЅР°Р»Рµ РѕС‚РєР»СЋС‡РµРЅС‹ РєРѕРјРјРµРЅС‚Р°СЂРёРё РёР»Рё РЅРµС‚ discussion-РіСЂСѓРїРїС‹.";
+  if (code === "COMMENT_RESTRICTED") return "РЈ Р°РєРєР°СѓРЅС‚Р° РµСЃС‚СЊ РѕРіСЂР°РЅРёС‡РµРЅРёСЏ РЅР° РѕС‚РїСЂР°РІРєСѓ РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ.";
+  if (code === "FLOOD_WAIT") return "РЎСЂР°Р±РѕС‚Р°Р» flood wait. РџРѕРґРѕР¶РґРёС‚Рµ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.";
+  if (code === "BANNED_IN_DISCUSSION") return "РђРєРєР°СѓРЅС‚ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ РІ discussion-РіСЂСѓРїРїРµ РєР°РЅР°Р»Р°.";
+  return "РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґРїРёСЃРєСѓ Р°РєРєР°СѓРЅС‚Р°, РґРѕСЃС‚СѓРї Рє РєРѕРјРјРµРЅС‚Р°СЂРёСЏРј Рё СЃС‚Р°С‚СѓСЃ Р°РєРєР°СѓРЅС‚Р°.";
 }
 
 router.get("/", async (req, res) => {
@@ -117,12 +117,12 @@ router.post("/", async (req, res) => {
     if (!parsed.data.telegramAccountId) {
       joinStatus = "FAILED";
       discussionJoinStatus = "FAILED";
-      joinError = "Выберите рабочий Telegram-аккаунт для подготовки доступа";
+      joinError = "Р’С‹Р±РµСЂРёС‚Рµ СЂР°Р±РѕС‡РёР№ Telegram-Р°РєРєР°СѓРЅС‚ РґР»СЏ РїРѕРґРіРѕС‚РѕРІРєРё РґРѕСЃС‚СѓРїР°";
       nextJoinAttemptAt = null;
     } else if (accountStatus !== TelegramAccountStatus.CONNECTED) {
       joinStatus = "FAILED";
       discussionJoinStatus = "FAILED";
-      joinError = "Подключите рабочий Telegram-аккаунт";
+      joinError = "РџРѕРґРєР»СЋС‡РёС‚Рµ СЂР°Р±РѕС‡РёР№ Telegram-Р°РєРєР°СѓРЅС‚";
       nextJoinAttemptAt = null;
     }
 
@@ -250,7 +250,7 @@ router.post("/:id/join/retry", async (req, res) => {
   }
 
   if (!channel.telegramAccountId) {
-    res.status(400).json({ error: "Выберите рабочий Telegram-аккаунт для подготовки доступа" });
+    res.status(400).json({ error: "Р’С‹Р±РµСЂРёС‚Рµ СЂР°Р±РѕС‡РёР№ Telegram-Р°РєРєР°СѓРЅС‚ РґР»СЏ РїРѕРґРіРѕС‚РѕРІРєРё РґРѕСЃС‚СѓРїР°" });
     return;
   }
 
@@ -259,7 +259,7 @@ router.post("/:id/join/retry", async (req, res) => {
   });
 
   if (!account || account.status !== TelegramAccountStatus.CONNECTED) {
-    res.status(400).json({ error: "Подключите рабочий Telegram-аккаунт" });
+    res.status(400).json({ error: "РџРѕРґРєР»СЋС‡РёС‚Рµ СЂР°Р±РѕС‡РёР№ Telegram-Р°РєРєР°СѓРЅС‚" });
     return;
   }
 
@@ -394,10 +394,10 @@ router.post("/:id/check-health", async (req, res) => {
     message = channel.joinError || JOIN_PENDING_MESSAGE;
   } else if (channel.joinStatus === "FAILED") {
     code = "NO_ACCESS";
-    message = channel.joinError || "Не удалось подготовить доступ к каналу";
+    message = channel.joinError || "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ РґРѕСЃС‚СѓРї Рє РєР°РЅР°Р»Сѓ";
   } else if (channel.discussionJoinStatus === "FAILED") {
     code = "COMMENTS_DISABLED";
-    message = channel.discussionJoinError || "Проблема с доступом к комментариям";
+    message = channel.discussionJoinError || "РџСЂРѕР±Р»РµРјР° СЃ РґРѕСЃС‚СѓРїРѕРј Рє РєРѕРјРјРµРЅС‚Р°СЂРёСЏРј";
   } else {
     code = mapSyncErrorToHealth(channel.syncError);
     if (code !== "OK") {
