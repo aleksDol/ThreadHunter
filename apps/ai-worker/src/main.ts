@@ -65,6 +65,9 @@ const aiResultSchema = z.object({
     .pipe(z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]))
     .optional()
     .default("skip"),
+  allowedIntents: z
+    .array(z.enum(["expert_comment", "neutral_opinion", "clarifying_question", "skip"]))
+    .optional(),
   relevanceScore: z.coerce.number().min(0).max(1).optional().default(0),
   riskLevel: z
     .string()
@@ -83,6 +86,7 @@ const aiResultSchema = z.object({
 const tolerantAiDefaults = {
   shouldComment: false,
   commentIntent: "skip" as const,
+  allowedIntents: [] as Array<"expert_comment" | "neutral_opinion" | "clarifying_question" | "skip">,
   relevanceScore: 0,
   riskLevel: "high" as const,
   expertAngle: "",
@@ -90,6 +94,15 @@ const tolerantAiDefaults = {
   commentType: "",
   keyTopic: "",
   spamRiskReason: ""
+};
+
+type CommentIntent = "expert_comment" | "neutral_opinion" | "clarifying_question" | "skip";
+type CommentMixPreset = "cautious" | "balanced" | "active";
+
+const MIX_PRESET_TARGETS: Record<CommentMixPreset, Record<Exclude<CommentIntent, "skip">, number>> = {
+  cautious: { expert_comment: 0.8, neutral_opinion: 0.15, clarifying_question: 0.05 },
+  balanced: { expert_comment: 0.6, neutral_opinion: 0.25, clarifying_question: 0.15 },
+  active: { expert_comment: 0.4, neutral_opinion: 0.35, clarifying_question: 0.25 }
 };
 
 const generatedCommentSchema = z.object({
@@ -246,6 +259,100 @@ async function enqueueGeneration(workspaceId: string, opportunityId: string): Pr
 
 function randomMinutes(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function normalizeAllowedIntents(
+  allowedIntents: Array<CommentIntent> | undefined,
+  fallbackIntent: CommentIntent
+): Array<CommentIntent> {
+  const source = (allowedIntents && allowedIntents.length > 0 ? allowedIntents : fallbackIntent !== "skip" ? [fallbackIntent] : [])
+    .filter((intent) => intent !== "skip");
+  return Array.from(new Set(source));
+}
+
+function passesIntentThreshold(
+  intent: Exclude<CommentIntent, "skip">,
+  relevanceScore: number,
+  riskLevel: string,
+  neutralCommentsEnabled: boolean
+): boolean {
+  const risk = riskLevel.toLowerCase();
+  if (intent === "expert_comment") {
+    return risk !== "high" && relevanceScore >= 0.7;
+  }
+  if (intent === "neutral_opinion") {
+    return neutralCommentsEnabled && risk === "low" && relevanceScore >= 0.55;
+  }
+  return neutralCommentsEnabled && risk === "low" && relevanceScore >= 0.5;
+}
+
+async function getCurrentIntentStats(workspaceId: string): Promise<Record<Exclude<CommentIntent, "skip">, number>> {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const rows = (await prismaAny.generatedComment.groupBy({
+    by: ["commentIntent"],
+    where: {
+      workspaceId,
+      status: { in: [GeneratedCommentStatus.DRAFT, GeneratedCommentStatus.QUEUED, GeneratedCommentStatus.SENT, GeneratedCommentStatus.APPROVED] },
+      createdAt: { gte: startOfDay },
+      commentIntent: { in: ["expert_comment", "neutral_opinion", "clarifying_question"] }
+    },
+    _count: { _all: true }
+  })) as Array<{ commentIntent: string | null; _count: { _all: number } }>;
+
+  const stats: Record<Exclude<CommentIntent, "skip">, number> = {
+    expert_comment: 0,
+    neutral_opinion: 0,
+    clarifying_question: 0
+  };
+  for (const row of rows) {
+    if (!row.commentIntent) continue;
+    if (row.commentIntent === "expert_comment" || row.commentIntent === "neutral_opinion" || row.commentIntent === "clarifying_question") {
+      stats[row.commentIntent] = row._count._all;
+    }
+  }
+  return stats;
+}
+
+function selectFinalCommentIntent(args: {
+  allowedIntents: Array<CommentIntent>;
+  currentStats: Record<Exclude<CommentIntent, "skip">, number>;
+  preset: CommentMixPreset;
+  neutralCommentsEnabled: boolean;
+  relevanceScore: number;
+  riskLevel: string;
+}): CommentIntent {
+  const normalizedAllowed = Array.from(new Set(args.allowedIntents.filter((i) => i !== "skip")));
+  if (!args.neutralCommentsEnabled) {
+    if (
+      normalizedAllowed.includes("expert_comment") &&
+      passesIntentThreshold("expert_comment", args.relevanceScore, args.riskLevel, false)
+    ) {
+      return "expert_comment";
+    }
+    return "skip";
+  }
+
+  if (normalizedAllowed.length === 0) return "skip";
+
+  const targets = MIX_PRESET_TARGETS[args.preset];
+  const total = args.currentStats.expert_comment + args.currentStats.neutral_opinion + args.currentStats.clarifying_question;
+  const candidateOrder = (normalizedAllowed as Array<Exclude<CommentIntent, "skip">>)
+    .sort((a, b) => {
+      const aShare = total > 0 ? args.currentStats[a] / total : 0;
+      const bShare = total > 0 ? args.currentStats[b] / total : 0;
+      const aNeed = targets[a] - aShare;
+      const bNeed = targets[b] - bShare;
+      return bNeed - aNeed;
+    });
+
+  for (const intent of candidateOrder) {
+    if (passesIntentThreshold(intent, args.relevanceScore, args.riskLevel, true)) {
+      return intent;
+    }
+  }
+  return "skip";
 }
 
 function canWorkspaceDispatch(workspace: {
@@ -412,8 +519,9 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
   const prompt = [
     "You are an assistant that evaluates whether a Telegram post should receive a comment.",
     "Return STRICT JSON only with keys:",
-    "shouldComment, commentIntent, relevanceScore, riskLevel, expertAngle, analysisReason, commentType, keyTopic, spamRiskReason.",
+    "shouldComment, commentIntent, allowedIntents, relevanceScore, riskLevel, expertAngle, analysisReason, commentType, keyTopic, spamRiskReason.",
     "Allowed commentIntent values: expert_comment, neutral_opinion, clarifying_question, skip.",
+    "allowedIntents is optional array of suitable intents for this post from: expert_comment, neutral_opinion, clarifying_question.",
     "Rules:",
     "- shouldComment=false if post is not relevant to workspace niche/knowledge base.",
     "- shouldComment=false if response would require direct self-promotion.",
@@ -428,7 +536,7 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
     "- neutral_opinion: short meaningful neutral/supportive reaction (including concise congratulations when relevant).",
     "- clarifying_question: exactly one short natural question that continues discussion.",
     "- skip: if forced, risky, irrelevant, or low-value.",
-    "- If neutralCommentsEnabled=false, neutral_opinion and clarifying_question must become skip.",
+    "- If neutralCommentsEnabled=false, you can still include allowedIntents, but expert_comment should be preferred in commentIntent.",
     "Workspace: " + opportunity.workspace.name,
     "Channel: @" + opportunity.monitoredChannel.username,
     "Post:\n" + opportunity.postText,
@@ -465,10 +573,19 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
             .slice(0, 300)}`
         };
     const neutralEnabled = Boolean(opportunity.workspace?.neutralCommentsEnabled);
-    let finalIntent = result.commentIntent;
-    if (!neutralEnabled && (finalIntent === "neutral_opinion" || finalIntent === "clarifying_question")) {
-      finalIntent = "skip";
-    }
+    const presetRaw = String(opportunity.workspace?.commentMixPreset || "balanced").toLowerCase();
+    const preset: CommentMixPreset = presetRaw === "cautious" || presetRaw === "active" ? (presetRaw as CommentMixPreset) : "balanced";
+    const fallbackIntent = (result.commentIntent || "skip") as CommentIntent;
+    const allowedIntents = normalizeAllowedIntents(result.allowedIntents as Array<CommentIntent> | undefined, fallbackIntent);
+    const currentStats = await getCurrentIntentStats(opportunity.workspaceId);
+    const finalIntent = selectFinalCommentIntent({
+      allowedIntents,
+      currentStats,
+      preset,
+      neutralCommentsEnabled: neutralEnabled,
+      relevanceScore: result.relevanceScore,
+      riskLevel: result.riskLevel
+    });
 
     const shouldComment = parsed.success && result.shouldComment && finalIntent !== "skip";
     const analysisStatus = shouldComment
@@ -485,6 +602,7 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
         status,
         shouldComment,
         commentIntent: finalIntent,
+        allowedIntents,
         relevanceScore: result.relevanceScore,
         riskLevel: result.riskLevel,
         expertAngle: result.expertAngle,
@@ -495,19 +613,7 @@ async function analyzeOpportunity(payload: z.infer<typeof analysisPayloadSchema>
       }
     });
 
-    const canAutoExpert = finalIntent === "expert_comment" && result.riskLevel !== "high" && result.relevanceScore >= 0.7;
-    const canAutoNeutral =
-      finalIntent === "neutral_opinion" &&
-      neutralEnabled &&
-      result.riskLevel === "low" &&
-      result.relevanceScore >= 0.4;
-    const canAutoQuestion =
-      finalIntent === "clarifying_question" &&
-      neutralEnabled &&
-      result.riskLevel === "low" &&
-      result.relevanceScore >= 0.5;
-
-    if (canAutoExpert || canAutoNeutral || canAutoQuestion) {
+    if (shouldComment) {
       await enqueueGeneration(opportunity.workspaceId, opportunity.id);
     }
   } catch (error) {

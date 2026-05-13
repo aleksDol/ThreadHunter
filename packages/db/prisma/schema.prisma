@@ -111,6 +111,7 @@ model Workspace {
   commentLimit          Int                    @default(20)
   commentsSentCount     Int                    @default(0)
   neutralCommentsEnabled Boolean               @default(false)
+  commentMixPreset      String                 @default("balanced")
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   owner                 User                   @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
@@ -190,6 +191,15 @@ model MonitoredChannel {
   username               String
   title                  String?
   status                 MonitoredChannelStatus
+  joinStatus             String?
+  joinError              String?
+  joinedAt               DateTime?
+  discussionUsername     String?
+  discussionJoinStatus   String?
+  discussionJoinError    String?
+  discussionJoinedAt     DateTime?
+  nextJoinAttemptAt      DateTime?
+  joinAttemptCount       Int                  @default(0)
   niche                  String?
   lastSeenPostId         String?
   monitoringStartedAt    DateTime?
@@ -308,6 +318,7 @@ model CommentOpportunity {
   keyTopic           String?
   spamRiskReason     String?
   commentIntent      String?
+  allowedIntents     String[]                 @default([])
   relevanceScore     Float?
   shouldComment      Boolean?
   riskLevel          String?
@@ -368,13 +379,19 @@ model AccountSafetyState {
   telegramAccountId String          @unique
   dailyCommentCount Int             @default(0)
   dailyLimit        Int             @default(10)
+  dailyJoinCount    Int             @default(0)
   minDelayMinutes   Int             @default(20)
+  minJoinDelayMinutes Int           @default(60)
   activeFromHour    Int             @default(9)
   activeToHour      Int             @default(21)
   timezone          String          @default("Europe/Amsterdam")
   lastDailyResetAt  DateTime?
+  lastJoinDailyResetAt DateTime?
   lastCommentAt     DateTime?
+  lastJoinAt        DateTime?
   cooldownUntil     DateTime?
+  joinCooldownUntil DateTime?
+  maxJoinPerDay     Int             @default(5)
   floodWaitUntil    DateTime?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt

@@ -7,7 +7,8 @@ const router = Router();
 const prismaAny = prisma as any;
 
 const settingsPatchSchema = z.object({
-  neutralCommentsEnabled: z.boolean().optional()
+  neutralCommentsEnabled: z.boolean().optional(),
+  commentMixPreset: z.enum(["cautious", "balanced", "active"]).optional()
 });
 
 router.get("/", (req, res) => {
@@ -48,11 +49,12 @@ router.get("/settings", async (req, res) => {
   const workspaceId = req.auth!.workspaceId;
   const workspace = await prismaAny.workspace.findUnique({
     where: { id: workspaceId },
-    select: { neutralCommentsEnabled: true }
+    select: { neutralCommentsEnabled: true, commentMixPreset: true }
   });
 
   res.json({
-    neutralCommentsEnabled: workspace?.neutralCommentsEnabled ?? false
+    neutralCommentsEnabled: workspace?.neutralCommentsEnabled ?? false,
+    commentMixPreset: workspace?.commentMixPreset ?? "balanced"
   });
 });
 
@@ -67,9 +69,10 @@ router.patch("/settings", async (req, res) => {
   const updated = await prismaAny.workspace.update({
     where: { id: workspaceId },
     data: {
-      neutralCommentsEnabled: parsed.data.neutralCommentsEnabled
+      neutralCommentsEnabled: parsed.data.neutralCommentsEnabled,
+      commentMixPreset: parsed.data.commentMixPreset
     },
-    select: { neutralCommentsEnabled: true }
+    select: { neutralCommentsEnabled: true, commentMixPreset: true }
   });
 
   res.json(updated);

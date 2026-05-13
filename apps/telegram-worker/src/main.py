@@ -15,6 +15,8 @@ from psycopg2.extras import RealDictCursor
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from telethon.sessions import StringSession
+from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
+from telethon.tl.types import PeerChannel
 
 load_dotenv()
 
@@ -22,6 +24,7 @@ LOGIN_QUEUE_NAME = "telegram-login:queue"
 MONITOR_QUEUE_NAME = "telegram-monitor:queue"
 AI_ANALYSIS_QUEUE_NAME = "ai-analysis:queue"
 DISPATCH_QUEUE_NAME = "telegram-dispatch:queue"
+JOIN_QUEUE_NAME = "telegram-join:queue"
 OWNED_CHANNEL_SYNC_QUEUE_NAME = "owned-channel-sync:queue"
 
 
@@ -220,6 +223,25 @@ def parse_dispatch_payload(raw: str) -> Optional[dict[str, Any]]:
     return payload
 
 
+def parse_join_payload(raw: str) -> Optional[dict[str, Any]]:
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        print("[telegram-worker] invalid join payload JSON; skipping")
+        return None
+
+    required = {"type", "workspaceId", "monitoredChannelId", "telegramAccountId", "createdAt"}
+    if not isinstance(payload, dict) or not required.issubset(payload.keys()):
+        print("[telegram-worker] join payload schema mismatch; skipping")
+        return None
+
+    if payload.get("type") != "join_monitored_channel":
+        print("[telegram-worker] unsupported join payload type; skipping")
+        return None
+
+    return payload
+
+
 def parse_owned_channel_sync_payload(raw: str) -> Optional[dict[str, Any]]:
     try:
         payload = json.loads(raw)
@@ -257,7 +279,8 @@ def get_dispatch_context(conn: Any, dispatch_job_id: str) -> Optional[dict[str, 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             'SELECT dj.*, gc."text" as "commentText", gc."status" as "generatedCommentStatus", '
-            'co."externalPostId", mc."username" as "channelUsername", '
+            'co."externalPostId", mc."username" as "channelUsername", mc."joinStatus" as "channelJoinStatus", '
+            'mc."discussionJoinStatus" as "channelDiscussionJoinStatus", mc."discussionJoinError" as "channelDiscussionJoinError", '
             'w."plan", w."subscriptionStatus", w."trialStartedAt", w."trialEndsAt", w."commentLimit", w."commentsSentCount", '
             'ta."workspaceId" as "accountWorkspaceId", ta."status" as "accountStatus", '
             'ta."sessionEncrypted", ta."proxyHost", ta."proxyPort", ta."proxyUsername", ta."proxyPassword", '
@@ -286,6 +309,20 @@ def get_owned_channel(conn: Any, owned_channel_id: str, workspace_id: str) -> Op
             'LEFT JOIN "TelegramAccount" ta ON ta."id" = oc."telegramAccountId" '
             'WHERE oc."id" = %s AND oc."workspaceId" = %s',
             (owned_channel_id, workspace_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_join_channel_with_account(conn: Any, monitored_channel_id: str, workspace_id: str) -> Optional[dict[str, Any]]:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT mc.*, ta."status" as "accountStatus", ta."sessionEncrypted", ta."proxyHost", '
+            'ta."proxyPort", ta."proxyUsername", ta."proxyPassword" '
+            'FROM "MonitoredChannel" mc '
+            'LEFT JOIN "TelegramAccount" ta ON ta."id" = mc."telegramAccountId" '
+            'WHERE mc."id" = %s AND mc."workspaceId" = %s',
+            (monitored_channel_id, workspace_id),
         )
         row = cur.fetchone()
         return dict(row) if row else None
@@ -373,9 +410,9 @@ def ensure_safety_state(conn: Any, telegram_account_id: str) -> dict[str, Any]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             'INSERT INTO "AccountSafetyState" '
-            '("telegramAccountId", "dailyCommentCount", "dailyLimit", "minDelayMinutes", '
-            '"activeFromHour", "activeToHour", "timezone", "createdAt", "updatedAt") '
-            'VALUES (%s, 0, 10, 20, 9, 21, %s, NOW(), NOW()) '
+            '("telegramAccountId", "dailyCommentCount", "dailyLimit", "dailyJoinCount", "maxJoinPerDay", "minDelayMinutes", '
+            '"minJoinDelayMinutes", "activeFromHour", "activeToHour", "timezone", "createdAt", "updatedAt") '
+            'VALUES (%s, 0, 10, 0, 5, 20, 60, 9, 21, %s, NOW(), NOW()) '
             'ON CONFLICT ("telegramAccountId") DO NOTHING',
             (telegram_account_id, "Europe/Amsterdam"),
         )
@@ -423,6 +460,25 @@ def apply_day_reset_if_needed(conn: Any, safety: dict[str, Any]) -> dict[str, An
         conn.commit()
         safety["dailyCommentCount"] = 0
         safety["lastDailyResetAt"] = utc_now()
+
+    return safety
+
+
+def apply_join_day_reset_if_needed(conn: Any, safety: dict[str, Any]) -> dict[str, Any]:
+    tz_name = safety.get("timezone") or "Europe/Amsterdam"
+    now_tz = datetime.now(ZoneInfo(tz_name))
+    last_reset = safety.get("lastJoinDailyResetAt")
+
+    if not last_reset or last_reset.astimezone(ZoneInfo(tz_name)).date() != now_tz.date():
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE "AccountSafetyState" SET "dailyJoinCount" = 0, "lastJoinDailyResetAt" = NOW(), "updatedAt" = NOW() '
+                'WHERE "telegramAccountId" = %s',
+                (safety["telegramAccountId"],),
+            )
+        conn.commit()
+        safety["dailyJoinCount"] = 0
+        safety["lastJoinDailyResetAt"] = utc_now()
 
     return safety
 
@@ -490,6 +546,45 @@ def evaluate_send_safety(safety: dict[str, Any]) -> tuple[bool, datetime, str]:
     )
 
     return ready_now, candidate.astimezone(timezone.utc), reason or "Rescheduled by safety rules"
+
+
+def evaluate_join_safety(safety: dict[str, Any]) -> tuple[bool, datetime, str]:
+    tz_name = safety.get("timezone") or "Europe/Amsterdam"
+    tz = ZoneInfo(tz_name)
+    now_tz = datetime.now(tz)
+    candidate = now_tz
+    reason = ""
+
+    join_cooldown = safety.get("joinCooldownUntil")
+    if join_cooldown and join_cooldown.astimezone(tz) > candidate:
+        candidate = join_cooldown.astimezone(tz)
+        reason = "Telegram временно ограничил действия"
+
+    daily_count = int(safety.get("dailyJoinCount") or 0)
+    max_per_day = int(safety.get("maxJoinPerDay") or 5)
+    min_delay = int(safety.get("minJoinDelayMinutes") or 60)
+    active_from = int(safety.get("activeFromHour") or 9)
+    active_to = int(safety.get("activeToHour") or 21)
+    last_join_at = safety.get("lastJoinAt")
+
+    if daily_count >= max_per_day:
+        candidate = (now_tz + timedelta(days=1)).replace(hour=active_from, minute=0, second=0, microsecond=0)
+        reason = "Лимит подписок на сегодня достигнут"
+
+    if last_join_at:
+        min_time = last_join_at.astimezone(tz) + timedelta(minutes=min_delay)
+        if min_time > candidate:
+            candidate = min_time
+            reason = "Ждём безопасную паузу между подписками"
+
+    candidate = next_active_start(candidate, active_from, active_to)
+    ready_now = (
+        inside_active_hours(now_tz.hour, active_from, active_to)
+        and daily_count < max_per_day
+        and (not join_cooldown or join_cooldown.astimezone(tz) <= now_tz)
+        and (not last_join_at or (last_join_at.astimezone(tz) + timedelta(minutes=min_delay)) <= now_tz)
+    )
+    return ready_now, candidate.astimezone(timezone.utc), reason or "Ждём безопасное время для подписки"
 
 
 def insert_opportunity(
@@ -647,6 +742,15 @@ async def process_monitor_job(
     if data.get("status") != "ACTIVE":
         return
 
+    join_status = str(data.get("joinStatus") or "")
+    discussion_status = str(data.get("discussionJoinStatus") or "")
+    if join_status not in ("JOINED", "NOT_REQUIRED"):
+        update_channel(conn, channel_id, syncError="Готовим доступ к каналу. Мониторинг начнётся после подписки.")
+        return
+    if discussion_status == "FAILED":
+        update_channel(conn, channel_id, syncError=data.get("discussionJoinError") or "Проблема с доступом к комментариям")
+        return
+
     if data.get("accountStatus") != "CONNECTED":
         update_channel(conn, channel_id, syncError="Linked account is not CONNECTED")
         return
@@ -748,6 +852,133 @@ async def process_monitor_job(
         await client.disconnect()
 
 
+async def process_join_job(conn: Any, job: dict[str, Any], api_id: int, api_hash: str, enc_key: bytes) -> None:
+    workspace_id = str(job["workspaceId"])
+    channel_id = str(job["monitoredChannelId"])
+    data = get_join_channel_with_account(conn, channel_id, workspace_id)
+    if not data:
+        return
+
+    if data.get("accountStatus") != "CONNECTED":
+        update_channel(conn, channel_id, joinStatus="FAILED", joinError="Подключите рабочий Telegram-аккаунт")
+        return
+
+    if str(data.get("joinStatus") or "") not in ("PENDING", "FAILED", "JOINING"):
+        return
+
+    next_attempt = as_utc(data.get("nextJoinAttemptAt"))
+    if next_attempt and next_attempt > utc_now():
+        return
+
+    encrypted = data.get("sessionEncrypted")
+    if not encrypted:
+        update_channel(conn, channel_id, joinStatus="FAILED", joinError="Подключите рабочий Telegram-аккаунт")
+        return
+
+    safety = ensure_safety_state(conn, str(data["telegramAccountId"]))
+    safety = apply_join_day_reset_if_needed(conn, safety)
+    ready_now, next_time, reason = evaluate_join_safety(safety)
+    if not ready_now:
+        update_channel(conn, channel_id, joinStatus="PENDING", joinError=reason, nextJoinAttemptAt=next_time)
+        return
+
+    try:
+        session_string = decrypt_session(str(encrypted), enc_key)
+    except Exception:
+        update_channel(conn, channel_id, joinStatus="FAILED", joinError="Не удалось расшифровать сессию аккаунта")
+        return
+
+    proxy = build_proxy_config(
+        data.get("proxyHost"),
+        data.get("proxyPort"),
+        data.get("proxyUsername"),
+        data.get("proxyPassword"),
+    )
+    client = TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
+    try:
+        update_channel(conn, channel_id, joinStatus="JOINING", joinError=None)
+        await client.connect()
+        entity = await client.get_entity(data["username"])
+        try:
+            await client(JoinChannelRequest(entity))
+        except Exception:
+            # Most often means already joined or join is not required.
+            pass
+
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE "MonitoredChannel" SET "joinStatus" = %s, "joinedAt" = NOW(), "joinError" = NULL, '
+                '"joinAttemptCount" = COALESCE("joinAttemptCount", 0) + 1, "updatedAt" = NOW() WHERE "id" = %s',
+                ("JOINED", channel_id),
+            )
+            cur.execute(
+                'UPDATE "AccountSafetyState" SET "dailyJoinCount" = "dailyJoinCount" + 1, "lastJoinAt" = NOW(), "updatedAt" = NOW() '
+                'WHERE "telegramAccountId" = %s',
+                (data["telegramAccountId"],),
+            )
+        conn.commit()
+
+        try:
+            full = await client(GetFullChannelRequest(entity))
+            linked_chat_id = getattr(full.full_chat, "linked_chat_id", None)
+        except Exception:
+            linked_chat_id = None
+
+        if not linked_chat_id:
+            update_channel(conn, channel_id, discussionJoinStatus="NOT_REQUIRED", discussionJoinError=None)
+            return
+
+        discussion_entity = await client.get_entity(PeerChannel(linked_chat_id))
+        discussion_username = getattr(discussion_entity, "username", None)
+        try:
+            await client(JoinChannelRequest(discussion_entity))
+            update_channel(
+                conn,
+                channel_id,
+                discussionUsername=discussion_username,
+                discussionJoinStatus="JOINED",
+                discussionJoinedAt=utc_now(),
+                discussionJoinError=None,
+            )
+        except Exception as exc:
+            lower = str(exc).lower()
+            error_text = "Не удалось вступить в группу обсуждений"
+            if "forbidden" in lower or "private" in lower:
+                error_text = "Комментарии закрыты"
+            elif "restricted" in lower or "banned" in lower:
+                error_text = "Аккаунт ограничен в группе обсуждений"
+            update_channel(
+                conn,
+                channel_id,
+                discussionUsername=discussion_username,
+                discussionJoinStatus="FAILED",
+                discussionJoinError=error_text,
+            )
+    except FloodWaitError as exc:
+        flood_until = utc_now() + timedelta(seconds=int(exc.seconds))
+        with conn.cursor() as cur:
+            cur.execute(
+                'UPDATE "AccountSafetyState" SET "joinCooldownUntil" = %s, "updatedAt" = NOW() WHERE "telegramAccountId" = %s',
+                (flood_until, data["telegramAccountId"]),
+            )
+        conn.commit()
+        update_channel(
+            conn,
+            channel_id,
+            joinStatus="PENDING",
+            joinError="Telegram временно ограничил подписки. Попробуем позже.",
+            nextJoinAttemptAt=flood_until,
+        )
+    except Exception as exc:
+        lower = str(exc).lower()
+        friendly = "Не удалось подготовить доступ к каналу"
+        if "private" in lower or "forbidden" in lower or "not participant" in lower:
+            friendly = "Нет доступа к каналу с этого рабочего аккаунта"
+        update_channel(conn, channel_id, joinStatus="FAILED", joinError=friendly)
+    finally:
+        await client.disconnect()
+
+
 async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_hash: str, enc_key: bytes) -> None:
     dispatch_job_id = str(job["dispatchJobId"])
     workspace_id = str(job["workspaceId"])
@@ -813,6 +1044,14 @@ async def process_dispatch_job(conn: Any, job: dict[str, Any], api_id: int, api_
 
     if ctx.get("accountStatus") != "CONNECTED":
         mark_dispatch_failed(conn, dispatch_job_id, "Telegram account is not CONNECTED")
+        return
+
+    if str(ctx.get("channelJoinStatus") or "") not in ("JOINED", "NOT_REQUIRED"):
+        mark_dispatch_failed(conn, dispatch_job_id, "Готовим доступ к каналу. Попробуйте позже.")
+        return
+
+    if str(ctx.get("channelDiscussionJoinStatus") or "") == "FAILED":
+        mark_dispatch_failed(conn, dispatch_job_id, str(ctx.get("channelDiscussionJoinError") or "Проблема с доступом к комментариям"))
         return
 
     generated_status = str(ctx.get("generatedCommentStatus") or "")
@@ -1077,6 +1316,18 @@ def fetch_active_channels(conn: Any) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
+def fetch_due_join_channels(conn: Any) -> list[dict[str, Any]]:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT "id", "workspaceId", "telegramAccountId" FROM "MonitoredChannel" '
+            'WHERE "telegramAccountId" IS NOT NULL AND "joinStatus" IN (%s, %s, %s) '
+            'AND ("nextJoinAttemptAt" IS NULL OR "nextJoinAttemptAt" <= NOW())',
+            ("PENDING", "FAILED", "JOINING"),
+        )
+        rows = cur.fetchall()
+        return [dict(r) for r in rows]
+
+
 def main() -> None:
     redis_url = os.getenv("REDIS_URL", "")
     database_url = os.getenv("DATABASE_URL", "")
@@ -1110,7 +1361,7 @@ def main() -> None:
 
     print("[telegram-worker] started")
     print(
-        f"[telegram-worker] consuming queues: {LOGIN_QUEUE_NAME}, {MONITOR_QUEUE_NAME}, {DISPATCH_QUEUE_NAME}, {OWNED_CHANNEL_SYNC_QUEUE_NAME}"
+        f"[telegram-worker] consuming queues: {LOGIN_QUEUE_NAME}, {MONITOR_QUEUE_NAME}, {DISPATCH_QUEUE_NAME}, {JOIN_QUEUE_NAME}, {OWNED_CHANNEL_SYNC_QUEUE_NAME}"
     )
 
     last_periodic_run = 0.0
@@ -1149,6 +1400,13 @@ def main() -> None:
                     print(f"[telegram-worker] dispatch queue item received: {payload.get('dispatchJobId')}")
                     asyncio.run(process_dispatch_job(conn, payload, api_id, api_hash, enc_key))
 
+            join_item = r.blpop(JOIN_QUEUE_NAME, timeout=1)
+            if join_item:
+                _, raw = join_item
+                payload = parse_join_payload(raw)
+                if payload:
+                    asyncio.run(process_join_job(conn, payload, api_id, api_hash, enc_key))
+
             owned_channel_item = r.blpop(OWNED_CHANNEL_SYNC_QUEUE_NAME, timeout=1)
             if owned_channel_item:
                 _, raw = owned_channel_item
@@ -1167,6 +1425,15 @@ def main() -> None:
                         "createdAt": utc_now().isoformat(),
                     }
                     asyncio.run(process_monitor_job(conn, r, job, api_id, api_hash, enc_key))
+                for channel in fetch_due_join_channels(conn):
+                    job = {
+                        "type": "join_monitored_channel",
+                        "monitoredChannelId": channel["id"],
+                        "workspaceId": channel["workspaceId"],
+                        "telegramAccountId": channel["telegramAccountId"],
+                        "createdAt": utc_now().isoformat(),
+                    }
+                    asyncio.run(process_join_job(conn, job, api_id, api_hash, enc_key))
                 last_periodic_run = now_ts
 
         except Exception as exc:

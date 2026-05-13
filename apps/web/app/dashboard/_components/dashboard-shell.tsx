@@ -56,8 +56,34 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[260px_1fr]">
-        <aside className="border-r border-slate-200 bg-slate-900 px-6 py-8 text-slate-100">
+      <aside className="hidden lg:block lg:fixed lg:inset-y-0 lg:left-0 lg:w-[260px] lg:overflow-y-auto border-r border-slate-200 bg-slate-900 px-6 py-8 text-slate-100">
+        <div className="mb-8">
+          <div className="text-2xl font-semibold leading-tight">Экспертный комментарий ИИ</div>
+        </div>
+        <nav className="space-y-2">
+          {navItems.map((item) => {
+            if (item.adminOnly && !isAdmin) {
+              return null;
+            }
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "block rounded-2xl px-4 py-2 text-sm transition",
+                  active ? "bg-slate-100 text-slate-900" : "text-slate-200 hover:bg-slate-800"
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="mx-auto min-h-screen w-full max-w-[1440px] lg:pl-[260px]">
+        <aside className="border-r border-slate-200 bg-slate-900 px-6 py-8 text-slate-100 lg:hidden">
           <div className="mb-8">
             <div className="text-2xl font-semibold leading-tight">Экспертный комментарий ИИ</div>
           </div>
@@ -82,7 +108,6 @@ export default function DashboardShell({ children }: { children: React.ReactNode
             })}
           </nav>
         </aside>
-
         <div className="flex min-w-0 flex-col">
           <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
             <h1 className="text-2xl font-semibold">{pageTitle}</h1>

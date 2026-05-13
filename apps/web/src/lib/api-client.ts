@@ -87,6 +87,15 @@ export type MonitoredChannel = {
   username: string;
   title: string | null;
   status: "PENDING" | "ACTIVE" | "PAUSED" | "ARCHIVED";
+  joinStatus: "NOT_REQUIRED" | "PENDING" | "JOINING" | "JOINED" | "FAILED" | null;
+  joinError: string | null;
+  joinedAt: string | null;
+  discussionUsername: string | null;
+  discussionJoinStatus: "NOT_REQUIRED" | "PENDING" | "JOINING" | "JOINED" | "FAILED" | null;
+  discussionJoinError: string | null;
+  discussionJoinedAt: string | null;
+  nextJoinAttemptAt: string | null;
+  joinAttemptCount: number;
   niche: string | null;
   lastSeenPostId: string | null;
   monitoringStartedAt: string | null;
@@ -100,7 +109,7 @@ export type MonitoredChannel = {
 export type ChannelHealth = {
   channelId: string;
   username: string;
-  health: "OK" | "NO_ACCESS" | "COMMENTS_DISABLED" | "COMMENT_RESTRICTED" | "FLOOD_WAIT" | "BANNED_IN_DISCUSSION" | "UNKNOWN_ERROR";
+  health: "OK" | "ACCESS_PREPARING" | "NO_ACCESS" | "COMMENTS_DISABLED" | "COMMENT_RESTRICTED" | "FLOOD_WAIT" | "BANNED_IN_DISCUSSION" | "UNKNOWN_ERROR";
   message: string;
   advice: string;
 };
@@ -273,6 +282,7 @@ export type OnboardingStatus = {
 
 export type WorkspaceSettings = {
   neutralCommentsEnabled: boolean;
+  commentMixPreset: "cautious" | "balanced" | "active";
 };
 
 export type AdminUserListItem = {
@@ -469,6 +479,7 @@ export const createMonitoredChannel = (input: CreateMonitoredChannelInput) => ap
 export const updateMonitoredChannel = (id: string, input: UpdateMonitoredChannelInput) => apiFetch<MonitoredChannel>(`/monitored-channels/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const startMonitoringChannel = (id: string) => apiFetch<MonitoredChannel>(`/monitored-channels/${id}/start-monitoring`, { method: "POST" });
 export const stopMonitoringChannel = (id: string) => apiFetch<MonitoredChannel>(`/monitored-channels/${id}/stop-monitoring`, { method: "POST" });
+export const retryMonitoredChannelJoin = (id: string) => apiFetch<MonitoredChannel>(`/monitored-channels/${id}/join/retry`, { method: "POST" });
 export const updateMonitoringSettings = (id: string, freshnessWindowMinutes: number) => apiFetch<MonitoredChannel>(`/monitored-channels/${id}/settings`, { method: "PATCH", body: JSON.stringify({ freshnessWindowMinutes }) });
 export const deleteMonitoredChannel = (id: string) => apiFetch<{ ok: true }>(`/monitored-channels/${id}`, { method: "DELETE" });
 export const checkMonitoredChannelHealth = (id: string) => apiFetch<ChannelHealth>(`/monitored-channels/${id}/check-health`, { method: "POST" });

@@ -1,6 +1,7 @@
 ﻿import type { ChannelHealth } from "./api-client";
 
 export function mapChannelHealthCodeToRu(code: ChannelHealth["health"]): string {
+  if (code === "ACCESS_PREPARING") return "Готовим доступ к каналу и комментариям";
   if (code === "NO_ACCESS") return "Аккаунт не подписан на канал или нет доступа";
   if (code === "COMMENTS_DISABLED") return "В этом канале отключены комментарии";
   if (code === "COMMENT_RESTRICTED") return "Аккаунт не может писать комментарии в обсуждении";

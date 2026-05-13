@@ -1,11 +1,16 @@
-п»їimport { MonitoredChannelStatus, TelegramAccountStatus } from "@prisma/client";
+import { MonitoredChannelStatus, TelegramAccountStatus } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../../config/prisma";
-import { pushTelegramMonitorJob } from "../../config/queue";
+import { pushTelegramJoinJob, pushTelegramMonitorJob } from "../../config/queue";
 
 const router = Router();
+const JOIN_PENDING_MESSAGE = "Готовим доступ к каналу. Мониторинг начнётся после подписки.";
+
+function randomMinutes(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
 function normalizeUsername(value: string): string {
   return value
@@ -35,6 +40,7 @@ const settingsSchema = z.object({
 
 type ChannelHealthCode =
   | "OK"
+  | "ACCESS_PREPARING"
   | "NO_ACCESS"
   | "COMMENTS_DISABLED"
   | "COMMENT_RESTRICTED"
@@ -45,6 +51,7 @@ type ChannelHealthCode =
 function mapSyncErrorToHealth(syncError: string | null): ChannelHealthCode {
   if (!syncError) return "OK";
   const lower = syncError.toLowerCase();
+  if (lower.includes("готовим доступ") || lower.includes("после подписки")) return "ACCESS_PREPARING";
   if (lower.includes("not connected") || lower.includes("no access") || lower.includes("missing encrypted session")) return "NO_ACCESS";
   if (lower.includes("comments unavailable") || lower.includes("discussion")) return "COMMENTS_DISABLED";
   if (lower.includes("restricted")) return "COMMENT_RESTRICTED";
@@ -54,13 +61,14 @@ function mapSyncErrorToHealth(syncError: string | null): ChannelHealthCode {
 }
 
 function healthAdvice(code: ChannelHealthCode): string {
-  if (code === "OK") return "РљР°РЅР°Р» РґРѕСЃС‚СѓРїРµРЅ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° Рё РєРѕРјРјРµРЅС‚РёСЂРѕРІР°РЅРёСЏ.";
-  if (code === "NO_ACCESS") return "РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґРїРёСЃРєСѓ Р°РєРєР°СѓРЅС‚Р° РЅР° РєР°РЅР°Р» Рё СЃС‚Р°С‚СѓСЃ CONNECTED.";
-  if (code === "COMMENTS_DISABLED") return "Р’ РєР°РЅР°Р»Рµ РѕС‚РєР»СЋС‡РµРЅС‹ РєРѕРјРјРµРЅС‚Р°СЂРёРё РёР»Рё РЅРµС‚ discussion-РіСЂСѓРїРїС‹.";
-  if (code === "COMMENT_RESTRICTED") return "РЈ Р°РєРєР°СѓРЅС‚Р° РµСЃС‚СЊ РѕРіСЂР°РЅРёС‡РµРЅРёСЏ РЅР° РѕС‚РїСЂР°РІРєСѓ РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ.";
-  if (code === "FLOOD_WAIT") return "РЎСЂР°Р±РѕС‚Р°Р» flood wait. РџРѕРґРѕР¶РґРёС‚Рµ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.";
-  if (code === "BANNED_IN_DISCUSSION") return "РђРєРєР°СѓРЅС‚ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ РІ discussion-РіСЂСѓРїРїРµ РєР°РЅР°Р»Р°.";
-  return "РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґРїРёСЃРєСѓ Р°РєРєР°СѓРЅС‚Р°, РґРѕСЃС‚СѓРї Рє РєРѕРјРјРµРЅС‚Р°СЂРёСЏРј Рё СЃС‚Р°С‚СѓСЃ Р°РєРєР°СѓРЅС‚Р°.";
+  if (code === "OK") return "Канал доступен для мониторинга и комментирования.";
+  if (code === "ACCESS_PREPARING") return "Система аккуратно готовит доступ. Мониторинг и комментарии продолжатся автоматически.";
+  if (code === "NO_ACCESS") return "Проверьте подписку аккаунта на канал и статус CONNECTED.";
+  if (code === "COMMENTS_DISABLED") return "В канале отключены комментарии или нет discussion-группы.";
+  if (code === "COMMENT_RESTRICTED") return "У аккаунта есть ограничения на отправку комментариев.";
+  if (code === "FLOOD_WAIT") return "Сработал flood wait. Подождите и попробуйте позже.";
+  if (code === "BANNED_IN_DISCUSSION") return "Аккаунт заблокирован в discussion-группе канала.";
+  return "Проверьте подписку аккаунта, доступ к комментариям и статус аккаунта.";
 }
 
 router.get("/", async (req, res) => {
@@ -88,6 +96,7 @@ router.post("/", async (req, res) => {
     return;
   }
 
+  let accountStatus: TelegramAccountStatus | null = null;
   if (parsed.data.telegramAccountId) {
     const account = await prisma.telegramAccount.findFirst({
       where: { id: parsed.data.telegramAccountId, workspaceId }
@@ -96,9 +105,27 @@ router.post("/", async (req, res) => {
       res.status(400).json({ error: "telegramAccountId does not belong to current workspace" });
       return;
     }
+    accountStatus = account.status;
   }
 
   try {
+    let joinStatus: string = "PENDING";
+    let discussionJoinStatus: string = "PENDING";
+    let joinError: string | null = null;
+    let nextJoinAttemptAt: Date | null = new Date(Date.now() + randomMinutes(10, 180) * 60_000);
+
+    if (!parsed.data.telegramAccountId) {
+      joinStatus = "FAILED";
+      discussionJoinStatus = "FAILED";
+      joinError = "Выберите рабочий Telegram-аккаунт для подготовки доступа";
+      nextJoinAttemptAt = null;
+    } else if (accountStatus !== TelegramAccountStatus.CONNECTED) {
+      joinStatus = "FAILED";
+      discussionJoinStatus = "FAILED";
+      joinError = "Подключите рабочий Telegram-аккаунт";
+      nextJoinAttemptAt = null;
+    }
+
     const created = await prisma.monitoredChannel.create({
       data: {
         workspaceId,
@@ -106,9 +133,23 @@ router.post("/", async (req, res) => {
         title: parsed.data.title,
         niche: parsed.data.niche,
         telegramAccountId: parsed.data.telegramAccountId,
-        status: MonitoredChannelStatus.PENDING
+        status: MonitoredChannelStatus.PENDING,
+        joinStatus,
+        discussionJoinStatus,
+        joinError,
+        nextJoinAttemptAt
       }
     });
+
+    if (parsed.data.telegramAccountId && joinStatus === "PENDING") {
+      await pushTelegramJoinJob({
+        type: "join_monitored_channel",
+        workspaceId,
+        monitoredChannelId: created.id,
+        telegramAccountId: parsed.data.telegramAccountId,
+        createdAt: new Date().toISOString()
+      });
+    }
 
     res.status(201).json(created);
   } catch {
@@ -148,7 +189,7 @@ router.post("/:id/start-monitoring", async (req, res) => {
       status: MonitoredChannelStatus.ACTIVE,
       monitoringStartedAt: new Date(),
       lastSeenPostId: null,
-      syncError: null
+      syncError: channel.joinStatus === "PENDING" || channel.joinStatus === "JOINING" ? JOIN_PENDING_MESSAGE : null
     }
   });
 
@@ -191,6 +232,54 @@ router.post("/:id/stop-monitoring", async (req, res) => {
       status: MonitoredChannelStatus.PAUSED,
       syncError: null
     }
+  });
+
+  res.json(updated);
+});
+
+router.post("/:id/join/retry", async (req, res) => {
+  const workspaceId = req.auth!.workspaceId;
+
+  const channel = await prisma.monitoredChannel.findFirst({
+    where: { id: req.params.id, workspaceId }
+  });
+
+  if (!channel) {
+    res.status(404).json({ error: "Monitored channel not found" });
+    return;
+  }
+
+  if (!channel.telegramAccountId) {
+    res.status(400).json({ error: "Выберите рабочий Telegram-аккаунт для подготовки доступа" });
+    return;
+  }
+
+  const account = await prisma.telegramAccount.findFirst({
+    where: { id: channel.telegramAccountId, workspaceId }
+  });
+
+  if (!account || account.status !== TelegramAccountStatus.CONNECTED) {
+    res.status(400).json({ error: "Подключите рабочий Telegram-аккаунт" });
+    return;
+  }
+
+  const updated = await prisma.monitoredChannel.update({
+    where: { id: channel.id },
+    data: {
+      joinStatus: "PENDING",
+      discussionJoinStatus: "PENDING",
+      joinError: null,
+      discussionJoinError: null,
+      nextJoinAttemptAt: new Date(Date.now() + randomMinutes(5, 60) * 60_000)
+    }
+  });
+
+  await pushTelegramJoinJob({
+    type: "join_monitored_channel",
+    workspaceId,
+    monitoredChannelId: channel.id,
+    telegramAccountId: channel.telegramAccountId,
+    createdAt: new Date().toISOString()
   });
 
   res.json(updated);
@@ -300,6 +389,15 @@ router.post("/:id/check-health", async (req, res) => {
   } else if (channel.telegramAccount.status !== TelegramAccountStatus.CONNECTED) {
     code = "NO_ACCESS";
     message = "Linked telegram account is not CONNECTED";
+  } else if (channel.joinStatus === "PENDING" || channel.joinStatus === "JOINING") {
+    code = "ACCESS_PREPARING";
+    message = channel.joinError || JOIN_PENDING_MESSAGE;
+  } else if (channel.joinStatus === "FAILED") {
+    code = "NO_ACCESS";
+    message = channel.joinError || "Не удалось подготовить доступ к каналу";
+  } else if (channel.discussionJoinStatus === "FAILED") {
+    code = "COMMENTS_DISABLED";
+    message = channel.discussionJoinError || "Проблема с доступом к комментариям";
   } else {
     code = mapSyncErrorToHealth(channel.syncError);
     if (code !== "OK") {
